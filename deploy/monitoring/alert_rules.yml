@@ -1,0 +1,42 @@
+groups:
+  - name: smart_learning_platform_alerts
+    rules:
+      - alert: PlatformBackendDown
+        expr: up{job="platform-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: engineering
+        annotations:
+          summary: "业务后端服务不可达"
+          description: "platform-backend 连续 1 分钟未响应 Prometheus 抓取，请检查容器与 PostgreSQL 连接状态。"
+
+      - alert: AiTutorServiceDown
+        expr: up{job="ai-tutor-service"} == 0
+        for: 1m
+        labels:
+          severity: high
+          team: ai
+        annotations:
+          summary: "AI 助教服务不可达（主站已进入降级兜底模式）"
+          description: "ai-tutor-service 连续 1 分钟离线，工程后端 AiServiceClient 已自动切换降级保护。"
+
+      - alert: AiDegradedCallSpike
+        expr: increase(ai_tutor_degraded_calls_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          team: ai
+        annotations:
+          summary: "AI 模型推理降级次数异常升高"
+          description: "最近 5 分钟内 AI 服务发生超过 5 次远端大模型降级回退，请检查 API Key 配额或推理节点延迟。"
+
+      - alert: AiAsyncJobFailures
+        expr: ai_tutor_jobs_count{status="failed"} > 3
+        for: 5m
+        labels:
+          severity: warning
+          team: ai
+        annotations:
+          summary: "AI 异步任务队列存在积压失败任务"
+          description: "当前存在超过 3 个失败状态的视频章节化或索引重建任务，请前往管理后台域 3 监控台查看原因并重试。"

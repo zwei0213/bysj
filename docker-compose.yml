@@ -1,0 +1,119 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: slp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smart_learning}
+      POSTGRES_USER: ${POSTGRES_USER:-slp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请先运行 python scripts/init-prod-env.py 生成生产环境 .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-slp_user} -d ${POSTGRES_DB:-smart_learning}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ai-tutor-service:
+    build:
+      context: ./ai-tutor-service
+    container_name: slp-ai-tutor-service
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      AI_SERVICE_KEY: ${AI_SERVICE_KEY:?请先运行 python scripts/init-prod-env.py 生成 AI_SERVICE_KEY}
+      AI_OPS_KEY: ${AI_OPS_KEY:?请先运行 python scripts/init-prod-env.py 生成 AI_OPS_KEY}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:?请先运行 python scripts/init-prod-env.py 生成 WEBHOOK_SIGNING_SECRET}
+      AI_PROVIDER: ${AI_PROVIDER:-local}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_ASR_MODEL: ${OPENAI_ASR_MODEL:-whisper-1}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      ASR_PROVIDER: ${ASR_PROVIDER:-auto}
+      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+    volumes:
+      - ai_runtime_data:/srv/ai-tutor-service/.ai_runtime_data
+    networks:
+      - backend_internal
+    # 如服务器配备 NVIDIA GPU 并已安装 nvidia-container-toolkit，可取消以下注释并将 WHISPER_DEVICE 设为 cuda、WHISPER_COMPUTE_TYPE 设为 float16：
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  platform-backend:
+    build:
+      context: ./platform-backend
+    container_name: slp-platform-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-tutor-service:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-slp_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-smart_learning}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+      STORAGE_DIR: /srv/storage
+      PUBLIC_BACKEND_ORIGIN: http://platform-backend:8000
+      MAX_VIDEO_UPLOAD_MB: ${MAX_VIDEO_UPLOAD_MB:-2048}
+      MAX_DOCUMENT_UPLOAD_MB: ${MAX_DOCUMENT_UPLOAD_MB:-100}
+      JWT_SECRET: ${JWT_SECRET:?请先运行 python scripts/init-prod-env.py 生成 JWT_SECRET}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-12}
+      JWT_REFRESH_EXPIRE_DAYS: ${JWT_REFRESH_EXPIRE_DAYS:-14}
+      AI_SERVICE_BASE_URL: http://ai-tutor-service:8001
+      AI_SERVICE_KEY: ${AI_SERVICE_KEY}
+      AI_OPS_KEY: ${AI_OPS_KEY}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
+      PLATFORM_CALLBACK_URL: http://platform-backend:8000/internal/v1/webhooks/ai-jobs
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?请先运行 python scripts/init-prod-env.py 生成初始管理员密码}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@learning-platform.com}
+    volumes:
+      - platform_media_data:/srv/storage
+    networks:
+      - backend_internal
+      - public_edge
+
+  platform-frontend:
+    build:
+      context: ./platform-frontend
+    container_name: slp-platform-frontend
+    restart: unless-stopped
+    depends_on:
+      platform-backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    networks:
+      - public_edge
+
+networks:
+  backend_internal:
+    driver: bridge
+    internal: false
+  public_edge:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  ai_runtime_data:
+  platform_media_data:

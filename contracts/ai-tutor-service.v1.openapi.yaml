@@ -1,0 +1,1147 @@
+openapi: 3.1.0
+info:
+  title: Smart Learning AI Tutor Service API (Contract Layer)
+  version: 1.0.0
+  description: >-
+    高校 AI 团队交付的独立「AI 助教服务」HTTP 契约规范（v1.0 完整契约版，预留 V2 策略扩展点）。
+    严格无业务用户状态：所有学生历史数据由网站工程后端按需传入；业务调用与管理端运营治理调用采用双密钥物理隔离鉴权。
+servers:
+  - url: http://localhost:8001
+    description: Local Development / Docker Internal AI Service
+security:
+  - ServiceKeyAuth: []
+tags:
+  - name: Probe
+    description: 容器存活探针与 Prometheus 标准指标暴露 (/healthz, /metrics)
+  - name: AsyncJobs
+    description: 视频章节化与知识库构建等长耗时异步作业协议 (/v1/jobs)
+  - name: Chapters
+    description: 视频单章节按需重新生成协议 (/v1/chapters)
+  - name: KnowledgeBases
+    description: 课程级隔离知识库文档与教师校准问答增量同步 (/v1/knowledge-bases)
+  - name: Tutor
+    description: RAG 助教问答、边看边问时间戳感知、多轮指代与快捷追问 (/v1/tutor)
+  - name: Assessments
+    description: 教师题库智能出题、章节自测与个性化薄弱点组题 (/v1/assessments)
+  - name: Recommendations
+    description: 基于课程知识点与学习行为的无状态轻量推荐 (/v1/recommendations)
+  - name: Analytics
+    description: 学生提问热点聚类与教学盲区发现 (/v1/analytics)
+  - name: Operations
+    description: 独立鉴权的 AI 生产监控、索引健康、用量统计与质量治理接口 (/v1/ops)
+
+components:
+  securitySchemes:
+    ServiceKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Key
+      description: 网站工程后端业务调用密钥
+    OpsKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Ops-Key
+      description: 管理端 AI 运营与治理专用密钥（与业务密钥独立）
+  parameters:
+    RequestIdHeader:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 全链路追踪 ID，响应原样回传并透传至异步回调
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 幂等键（24 小时有效期内相同键直接返回首次受理结果），防止网络重试导致长任务重复执行
+    CallerRoleHeader:
+      name: X-Caller-Role
+      in: header
+      required: false
+      schema:
+        type: string
+        enum: [student, teacher, admin]
+      description: 发起请求的业务端角色（用于按角色执行每分钟调用配额限流）
+    CallerIdHeader:
+      name: X-Caller-ID
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 发起请求的调用方标识（传入时结合 X-Caller-Role 执行 60s 滑动时间窗限流）
+  schemas:
+    ResponseMeta:
+      type: object
+      required: [request_id, timestamp]
+      properties:
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            page_size: { type: integer }
+            total: { type: integer }
+            total_pages: { type: integer }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: { type: string, example: INVALID_SERVICE_KEY }
+            message: { type: string }
+            details:
+              type: array
+              items: { type: object }
+            request_id: { type: string }
+    JobCreateRequest:
+      type: object
+      required: [job_type, course_id, payload]
+      properties:
+        job_type:
+          type: string
+          enum: [video_chapterization, knowledge_index_build]
+        course_id:
+          type: string
+        callback_url:
+          type: [string, "null"]
+          format: uri
+          description: 任务终态时回调工程后端的 Webhook 地址（带 HMAC-SHA256 签名）
+        payload:
+          type: object
+          description: 随 job_type 变化的输入参数（如 video_id, video_title, media_url, raw_transcript_text, transcript_segments, index_immediately 等）
+        run_inline:
+          type: boolean
+          default: false
+          description: 联调或单测可选内联同步执行；生产默认 false 走后台异步队列
+    JobResource:
+      type: object
+      required: [job_id, job_type, course_id, status, progress, created_at, updated_at]
+      properties:
+        job_id: { type: string }
+        job_type: { type: string }
+        course_id: { type: string }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        retry_count: { type: integer }
+        payload: { type: object }
+        result:
+          type: [object, "null"]
+        error_message:
+          type: [string, "null"]
+        duration_ms:
+          type: [integer, "null"]
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ChapterRegenerateRequest:
+      type: object
+      required: [course_id]
+      properties:
+        course_id: { type: string, minLength: 1 }
+        video_id: { type: string, default: "" }
+        video_title: { type: string, default: "" }
+        start_sec: { type: integer, minimum: 0, default: 0 }
+        end_sec: { type: integer, minimum: 1, default: 60 }
+        transcript_segments:
+          type: array
+          default: []
+          items:
+            type: object
+            properties:
+              start_sec: { type: integer }
+              end_sec: { type: integer }
+              text: { type: string }
+        transcript_text: { type: string, default: "" }
+        current_title: { type: string, default: "" }
+        instruction: { type: string, default: "" }
+        caller_role: { type: [string, "null"] }
+        caller_id: { type: [string, "null"] }
+    ChapterRegenerateResponse:
+      type: object
+      required: [title, summary, start_sec, end_sec, knowledge_points, strategy_used, degraded]
+      properties:
+        title: { type: string }
+        summary: { type: string }
+        start_sec: { type: integer }
+        end_sec: { type: integer }
+        knowledge_points:
+          type: array
+          items: { type: string }
+        strategy_used: { type: string }
+        degraded: { type: boolean }
+    DocumentUpsertRequest:
+      type: object
+      required: [title, source_type, content]
+      properties:
+        title: { type: string }
+        source_type:
+          type: string
+          enum: [document, video_transcript, teacher_qa, faq]
+        content: { type: string }
+        metadata:
+          type: object
+          properties:
+            video_id: { type: string }
+            chapter_id: { type: string }
+            start_sec: { type: number }
+            end_sec: { type: number }
+            file_format: { type: string }
+    DocumentUpsertResponse:
+      type: object
+      required: [course_id, document_id, status, document_chunk_count, total_chunk_count]
+      properties:
+        course_id: { type: string }
+        document_id: { type: string }
+        status: { type: string, enum: [unindexed, indexing, ready, stale, failed] }
+        document_chunk_count: { type: integer }
+        total_chunk_count: { type: integer }
+        last_built_at: { type: [string, "null"], format: date-time }
+    DocumentDeleteResponse:
+      type: object
+      required: [course_id, document_id, removed, status, total_chunk_count]
+      properties:
+        course_id: { type: string }
+        document_id: { type: string }
+        removed: { type: boolean }
+        status: { type: string }
+        total_chunk_count: { type: integer }
+    TutorReplyRequest:
+      type: object
+      required: [course_id, question]
+      properties:
+        course_id: { type: string }
+        question: { type: string, minLength: 1, maxLength: 2000 }
+        quick_action:
+          type: [string, "null"]
+          enum: [explain_simply, give_example, summarize_key_points, null]
+        video_context:
+          type: [object, "null"]
+          properties:
+            video_id: { type: string }
+            video_title: { type: string }
+            chapter_id: { type: string }
+            chapter_title: { type: string }
+            timestamp_sec: { type: number }
+        conversation_history:
+          type: array
+          items:
+            type: object
+            properties:
+              role: { type: string, enum: [user, assistant] }
+              content: { type: string }
+        tutor_policy:
+          type: object
+          properties:
+            strict_course_only: { type: boolean, default: true }
+            allow_out_of_syllabus: { type: boolean, default: false }
+            tone: { type: string, default: encouraging_academic }
+            forbidden_topics:
+              type: array
+              items: { type: string }
+        caller_role: { type: [string, "null"] }
+        caller_id: { type: [string, "null"] }
+    CitationItem:
+      type: object
+      required: [source_type, source_id, title, snippet]
+      properties:
+        source_type: { type: string }
+        source_id: { type: string }
+        title: { type: string }
+        snippet: { type: string }
+        video_id: { type: [string, "null"] }
+        chapter_id: { type: [string, "null"] }
+        timestamp_sec: { type: [number, "null"] }
+        score: { type: number }
+    TutorReplyResponse:
+      type: object
+      required: [answer, confidence, needs_teacher_review, degraded, citations, suggested_followups]
+      properties:
+        answer: { type: string }
+        confidence: { type: number }
+        needs_teacher_review: { type: boolean }
+        policy_blocked: { type: boolean }
+        degraded: { type: boolean }
+        strategy_used: { type: string }
+        citations:
+          type: array
+          items: { $ref: "#/components/schemas/CitationItem" }
+        suggested_followups:
+          type: array
+          items: { type: string }
+    AssessmentGenerationRequest:
+      type: object
+      required: [course_id]
+      properties:
+        course_id: { type: string }
+        mode:
+          type: string
+          enum: [teacher_bank, chapter_practice, personalized_diagnostic]
+          default: chapter_practice
+        scope:
+          type: object
+          properties:
+            chapter_ids: { type: array, items: { type: string } }
+            knowledge_points: { type: array, items: { type: string } }
+            question_types:
+              type: array
+              items: { type: string, enum: [single_choice, multiple_choice, true_false] }
+            difficulty:
+              type: string
+              enum: [easy, medium, hard, mixed]
+              default: mixed
+            count:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 4
+        learner_profile:
+          type: [object, "null"]
+          description: 仅在 personalized_diagnostic 模式下由工程后端按需传入，AI 服务不持久化该画像
+          properties:
+            weak_knowledge_points: { type: array, items: { type: string } }
+            recent_wrong_question_stems: { type: array, items: { type: string } }
+            recent_asked_questions: { type: array, items: { type: string } }
+            mastery_by_topic:
+              type: object
+              additionalProperties: { type: number }
+        caller_role: { type: [string, "null"] }
+        caller_id: { type: [string, "null"] }
+    QuestionOption:
+      type: object
+      required: [key, text]
+      properties:
+        key: { type: string, example: A }
+        text: { type: string }
+    AssessmentQuestion:
+      type: object
+      required: [question_type, stem, options, answer, explanation, difficulty, knowledge_point]
+      properties:
+        question_type:
+          type: string
+          enum: [single_choice, multiple_choice, true_false]
+        stem: { type: string }
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionOption" }
+        answer:
+          type: array
+          items: { type: string }
+        explanation: { type: string }
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        knowledge_point: { type: string }
+        chapter_id: { type: [string, "null"] }
+    AssessmentGenerationResponse:
+      type: object
+      required: [mode, strategy_used, degraded, questions]
+      properties:
+        mode: { type: string }
+        strategy_used: { type: string }
+        targeted_knowledge_points:
+          type: array
+          items: { type: string }
+        degraded: { type: boolean }
+        questions:
+          type: array
+          items: { $ref: "#/components/schemas/AssessmentQuestion" }
+    RecommendationRequest:
+      type: object
+      properties:
+        course_id: { type: string, default: global }
+        candidate_items:
+          type: array
+          items:
+            type: object
+            properties:
+              item_id: { type: string }
+              item_type: { type: string }
+              course_id: { type: string }
+              video_id: { type: [string, "null"] }
+              chapter_id: { type: [string, "null"] }
+              start_sec: { type: [integer, "null"] }
+              title: { type: string }
+              knowledge_points:
+                type: array
+                items: { type: string }
+        learner_history:
+          type: object
+          properties:
+            completed_item_ids: { type: array, items: { type: string } }
+            weak_knowledge_points: { type: array, items: { type: string } }
+            recent_asked_topics: { type: array, items: { type: string } }
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 4
+    RecommendationItem:
+      type: object
+      required: [item_id, item_type, course_id, title, score, priority_tag, reason]
+      properties:
+        item_id: { type: string }
+        item_type: { type: string }
+        course_id: { type: string }
+        video_id: { type: [string, "null"] }
+        chapter_id: { type: [string, "null"] }
+        start_sec: { type: [integer, "null"] }
+        title: { type: string }
+        score: { type: number }
+        priority_tag: { type: string }
+        reason: { type: string }
+    RecommendationResponse:
+      type: object
+      required: [strategy_used, items]
+      properties:
+        strategy_used: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RecommendationItem" }
+    QuestionClusterRequest:
+      type: object
+      required: [course_id]
+      properties:
+        course_id: { type: string, minLength: 1 }
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              question: { type: string }
+              confidence: { type: number }
+              needs_teacher_review: { type: boolean }
+        known_knowledge_points:
+          type: array
+          items: { type: string }
+    QuestionClusterItem:
+      type: object
+      required: [topic_label, question_count, avg_confidence, unanswered_count, sample_questions, teaching_suggestion]
+      properties:
+        topic_label: { type: string }
+        question_count: { type: integer }
+        avg_confidence: { type: number }
+        unanswered_count: { type: integer }
+        sample_questions:
+          type: array
+          items: { type: string }
+        teaching_suggestion: { type: string }
+    QuestionClusterResponse:
+      type: object
+      required: [strategy_used, clusters]
+      properties:
+        strategy_used: { type: string }
+        clusters:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionClusterItem" }
+    KnowledgeBaseStatus:
+      type: object
+      required: [course_id, status, document_count, chunk_count, updated_at]
+      properties:
+        course_id: { type: string }
+        status:
+          type: string
+          enum: [unindexed, indexing, ready, stale, failed]
+        document_count: { type: integer }
+        chunk_count: { type: integer }
+        last_built_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: string, format: date-time }
+    UsageCapabilityMetric:
+      type: object
+      required: [capability, call_count, total_tokens, avg_latency_ms, estimated_cost_usd]
+      properties:
+        capability: { type: string }
+        call_count: { type: integer }
+        total_tokens: { type: integer }
+        avg_latency_ms: { type: number }
+        estimated_cost_usd: { type: number }
+    UsageMetricsResponse:
+      type: object
+      required: [total_calls, total_tokens, estimated_total_cost_usd, avg_latency_ms, degraded_calls, by_capability]
+      properties:
+        total_calls: { type: integer }
+        total_tokens: { type: integer }
+        estimated_total_cost_usd: { type: number }
+        avg_latency_ms: { type: number }
+        degraded_calls: { type: integer }
+        by_capability:
+          type: array
+          items: { $ref: "#/components/schemas/UsageCapabilityMetric" }
+    FeedbackSampleRequest:
+      type: object
+      required: [course_id, input_text]
+      properties:
+        sample_id: { type: [string, "null"] }
+        course_id: { type: string, minLength: 1 }
+        sample_type: { type: string, default: tutor_reply }
+        source_reason: { type: string, default: student_downvote }
+        input_text: { type: string, minLength: 1 }
+        model_output: { type: string, default: "" }
+        expected_correction: { type: [string, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+    FeedbackSampleResource:
+      type: object
+      required: [sample_id, course_id, sample_type, source_reason, input_text, model_output, status, created_at]
+      properties:
+        sample_id: { type: string }
+        course_id: { type: string }
+        sample_type: { type: string }
+        source_reason: { type: string }
+        input_text: { type: string }
+        model_output: { type: string }
+        expected_correction: { type: [string, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+    RuntimeConfigResource:
+      type: object
+      required: [active_provider, confidence_threshold, feature_flags, safety_filter, rate_limit_per_minute, updated_at]
+      properties:
+        active_provider:
+          type: string
+          enum: [local, openai, gemini]
+        confidence_threshold: { type: number }
+        feature_flags:
+          type: object
+          additionalProperties: { type: boolean }
+        safety_filter:
+          type: object
+          properties:
+            input_filter_enabled: { type: boolean }
+            output_filter_enabled: { type: boolean }
+            blocked_keywords:
+              type: array
+              items: { type: string }
+        rate_limit_per_minute:
+          type: object
+          additionalProperties: { type: integer }
+        updated_at: { type: string, format: date-time }
+    RuntimeConfigPatchRequest:
+      type: object
+      properties:
+        active_provider:
+          type: [string, "null"]
+          enum: [local, openai, gemini, null]
+        confidence_threshold:
+          type: [number, "null"]
+          minimum: 0.05
+          maximum: 0.95
+        feature_flags:
+          type: [object, "null"]
+          additionalProperties: { type: boolean }
+        safety_filter:
+          type: [object, "null"]
+        rate_limit_per_minute:
+          type: [object, "null"]
+          additionalProperties: { type: integer }
+
+paths:
+  /healthz:
+    get:
+      tags: [Probe]
+      security: []
+      summary: 容器存活探针（无需鉴权）
+      responses:
+        "200":
+          description: 服务进程存活
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, example: ok }
+                      service: { type: string }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /metrics:
+    get:
+      tags: [Probe]
+      security: []
+      summary: Prometheus 标准文本格式运行指标（无需密钥，供内网探针采集）
+      responses:
+        "200":
+          description: Prometheus 0.0.4 文本指标（调用量、Token、降级次数、任务队列状态计数）
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/jobs:
+    post:
+      tags: [AsyncJobs]
+      summary: 提交异步 AI 任务（视频章节化流水线 / 知识库批量索引）
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobCreateRequest"
+      responses:
+        "202":
+          description: 任务已受理进入异步队列
+          headers:
+            Location:
+              schema: { type: string }
+              description: 任务状态查询相对路径 `/v1/jobs/{job_id}`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/JobResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "401":
+          description: 业务密钥无效
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/jobs/{job_id}:
+    get:
+      tags: [AsyncJobs]
+      summary: 查询异步 AI 任务状态与结构化结果
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 返回任务当前状态、进度及章节提纲/文字稿结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/JobResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/chapters/regenerations:
+    post:
+      tags: [Chapters]
+      summary: 按指定时间区间与教师指令重新生成单个视频章节的标题、提要与知识点
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/CallerRoleHeader"
+        - $ref: "#/components/parameters/CallerIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChapterRegenerateRequest"
+      responses:
+        "200":
+          description: 返回单章节重新生成的结构化结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/ChapterRegenerateResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "429":
+          description: 超出当前角色每分钟 AI 调用配额
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/knowledge-bases/{course_id}/documents/{document_id}:
+    put:
+      tags: [KnowledgeBases]
+      summary: 幂等写入或更新课程知识库文档/转写稿/教师回流问答
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: document_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentUpsertRequest"
+      responses:
+        "200":
+          description: 文档切片与向量/倒排索引已就绪
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/DocumentUpsertResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+    delete:
+      tags: [KnowledgeBases]
+      summary: 从课程知识库中移除指定文档切片
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: document_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 删除成功并返回最新切片数量
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/DocumentDeleteResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/tutor/replies:
+    post:
+      tags: [Tutor]
+      summary: 生成课程 RAG 助教回答（附精确引用出处、置信度、多轮上下文与建议追问）
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/CallerRoleHeader"
+        - $ref: "#/components/parameters/CallerIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TutorReplyRequest"
+      responses:
+        "200":
+          description: 返回助教回答、引用来源、建议追问及是否需转交教师收件箱标记
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/TutorReplyResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "429":
+          description: 超出当前角色每分钟 AI 调用配额
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/assessments/generations:
+    post:
+      tags: [Assessments]
+      summary: 生成结构化课程试题（支持教师批量出题、章节自测、薄弱点个性化测验）
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/CallerRoleHeader"
+        - $ref: "#/components/parameters/CallerIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentGenerationRequest"
+      responses:
+        "200":
+          description: 返回结构化 JSON 题目列表（题干/选项/答案/解析/难度/知识点/关联章节）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/AssessmentGenerationResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "429":
+          description: 超出当前角色每分钟 AI 调用配额
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/recommendations/generations:
+    post:
+      tags: [Recommendations]
+      summary: 基于学习历史与知识点相似度的轻量个性化内容推荐
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecommendationRequest"
+      responses:
+        "200":
+          description: 返回排序后的推荐学习单元及推荐理由
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/RecommendationResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/analytics/question-clusters:
+    post:
+      tags: [Analytics]
+      summary: 对学生提问记录进行主题聚类，定位高频教学盲区
+      parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestionClusterRequest"
+      responses:
+        "200":
+          description: 返回高频问题聚类簇及代表性问题
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/QuestionClusterResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/health:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: AI 服务健康度、当前激活策略与特性开关状态
+      responses:
+        "200":
+          description: 服务运行正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      service: { type: string }
+                      version: { type: string }
+                      status: { type: string }
+                      provider: { type: string }
+                      active_strategies: { type: object }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/jobs:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 分页查询 AI 异步任务监控队列（支持按状态/课程/任务类型/起止时间筛选）
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        - name: course_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: job_type
+          in: query
+          required: false
+          schema: { type: string, enum: [video_chapterization, knowledge_index_build] }
+        - name: start_time
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: 任务创建起始时间（ISO-8601）
+        - name: end_time
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: 任务创建结束时间（ISO-8601）
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: 任务分页列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/JobResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/jobs/{job_id}/retries:
+    post:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 失败或超时任务一键重试（支持可选 override_payload 修正故障参数）
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                run_inline: { type: boolean, default: false }
+                override_payload: { type: [object, "null"] }
+      responses:
+        "202":
+          description: 任务已重新入队执行
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/JobResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/knowledge-bases:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 查询全部课程知识库索引健康度概览
+      responses:
+        "200":
+          description: 各课程索引状态与文档切片数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/KnowledgeBaseStatus" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/knowledge-bases/{course_id}:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 查询指定课程知识库索引健康详情
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 指定课程索引状态、文档数与切片数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/KnowledgeBaseStatus" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/knowledge-bases/{course_id}/rebuilds:
+    post:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 触发指定课程知识库全量重建
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                callback_url: { type: [string, "null"], format: uri }
+                run_inline: { type: boolean, default: false }
+      responses:
+        "202":
+          description: 索引重建异步任务已受理
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/JobResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/metrics/usage:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 查询 AI 调用量、平均延迟、Token 消耗与云端算力费用估算
+      parameters:
+        - name: course_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: start_time
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: 遥测起始时间（ISO-8601）
+        - name: end_time
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: 遥测结束时间（ISO-8601）
+      responses:
+        "200":
+          description: 遥测用量统计汇总
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UsageMetricsResponse" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/feedback-samples:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 查看已回传的问题样本池（供 V2 Harness 回归评测集消费）
+      parameters:
+        - name: course_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: 问题样本分页列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/FeedbackSampleResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+    post:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 工程后端向 AI 团队同步点踩/举报/抽检标记的问题样本
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackSampleRequest" }
+      responses:
+        "201":
+          description: 样本已收录入评测候选池
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/FeedbackSampleResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+  /v1/ops/runtime-config:
+    get:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 读取 AI 运行时配置（敏感词过滤、特性开关、当前模型提供方与角色配额）
+      responses:
+        "200":
+          description: 当前运行时配置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/RuntimeConfigResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+    patch:
+      tags: [Operations]
+      security: [{ OpsKeyAuth: [] }]
+      summary: 局部热更新默认模型策略、置信度阈值、敏感词双向过滤规则、角色配额与 V2 特性开关
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuntimeConfigPatchRequest" }
+      responses:
+        "200":
+          description: 更新后的运行时配置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/RuntimeConfigResource" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+
+webhooks:
+  aiJobCompleted:
+    post:
+      summary: 异步 AI 任务到达终态（succeeded / failed）时回调工程后端 `/internal/v1/webhooks/ai-jobs`
+      parameters:
+        - name: X-Webhook-Timestamp
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          schema: { type: string, example: "sha256=8f1e..." }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobResource"
+      responses:
+        "200":
+          description: 工程后端确认接收并幂等落库

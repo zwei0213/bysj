@@ -1,0 +1,126 @@
+name: Smart Learning Platform CI/CD
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+env:
+  REGISTRY: ghcr.io
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  contract-and-ai-quality-gate:
+    name: OpenAPI Contract & AI Benchmark Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install AI service & test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ai-tutor-service/requirements.txt
+          pip install -r platform-backend/requirements.txt
+          pip install av numpy
+
+      - name: Validate OpenAPI 3.1 YAML contracts
+        run: |
+          python -c "
+          import pathlib, yaml
+          for path in sorted(pathlib.Path('contracts').glob('*.yaml')):
+              spec = yaml.safe_load(path.read_text(encoding='utf-8'))
+              assert spec.get('openapi', '').startswith('3.1'), f'Invalid OpenAPI version in {path}'
+              assert len(spec.get('paths', {})) > 0, f'Empty paths in {path}'
+              print(f'Verified {path}: {len(spec[\"paths\"])} paths')
+          "
+
+      - name: Run V1 AI Benchmark Evaluation Gate
+        run: |
+          python ai-tutor-service/benchmarks/run_v1_eval.py
+
+      - name: Run AI Service & Dual-Service E2E Pytest Suite
+        run: |
+          pytest tests/ -v
+
+  frontend-production-build:
+    name: Vue 3 Frontend Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: platform-frontend/pnpm-lock.yaml
+
+      - name: Install dependencies & build production bundle
+        working-directory: platform-frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+  build-and-publish-images:
+    name: Build & Push Docker Images
+    needs: [contract-and-ai-quality-gate, frontend-production-build]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service:
+          - name: ai-tutor-service
+            context: ./ai-tutor-service
+          - name: platform-backend
+            context: ./platform-backend
+          - name: platform-frontend
+            context: ./platform-frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push ${{ matrix.service.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

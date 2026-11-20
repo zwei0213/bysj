@@ -1,0 +1,2172 @@
+openapi: 3.1.0
+info:
+  title: Smart Learning Platform Business Backend API
+  version: 1.0.0
+  description: >-
+    工程团队交付的网站业务层 HTTP API 完整契约规范（v1.0）。
+    覆盖公共认证与通知中心、学生学习域、教师教学与人工校准域、管理端六大治理域、Prometheus 监控探针，以及接收 AI 助教服务异步任务回调的内部签名 Webhook 接口。
+servers:
+  - url: http://localhost:8000
+    description: Platform Business Backend
+security:
+  - BearerAuth: []
+tags:
+  - name: Probe
+    description: 数据库探活与 Prometheus 监控指标暴露
+  - name: MediaStreaming
+    description: 支持 HTTP 206 Partial Content Range 字节流拖拽播放的媒体分发
+  - name: Auth
+    description: 登录令牌签发、注册、刷新令牌、密码安全、当前身份与站内通知
+  - name: Courses
+    description: 课程分类、课程广场、班级选课、已发布章节与文字稿、精选 FAQ 与个人工单
+  - name: StudentLearning
+    description: 学习行为上报、时间戳笔记与书签、边看边问 AI 助教、章节自测/考试/个性化测验/错题重练、错题本、个人仪表盘与推荐
+  - name: TeacherStudio
+    description: 课程与封面管理、班级学生名册与 Excel 导入分组、大文件分片断点续传、AI 提纲校准与单章重生成、题库手动/AI 出题审题组卷、未解答收件箱回流、FAQ 与学情看板
+  - name: AdminGovernance
+    description: 管理端六大域（组织账号与权限矩阵、课程审核分类与合规下架、AI 任务与索引监控、按比例随机抽检与样本闭环、多维 CSV/XLSX 报表、公告工单审计与系统全景状态）
+  - name: InternalWebhooks
+    description: AI 服务异步任务完成回调接收端点（HMAC-SHA256 验签 + Idempotency-Key 幂等）
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ResponseMeta:
+      type: object
+      required: [request_id, timestamp]
+      properties:
+        request_id: { type: string }
+        timestamp: { type: string, format: date-time }
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            page_size: { type: integer }
+            total: { type: integer }
+            total_pages: { type: integer }
+
+    SuccessEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: object }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: { type: string, example: STORAGE_QUOTA_EXCEEDED }
+            message: { type: string }
+            details:
+              type: array
+              items: { type: object }
+            request_id: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+
+    RegisterRequest:
+      type: object
+      required: [username, display_name, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64 }
+        display_name: { type: string }
+        email: { type: string }
+        password: { type: string, minLength: 8 }
+        role: { type: string, enum: [student, teacher], default: student }
+
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    PasswordChangeRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string }
+        new_password: { type: string, minLength: 8 }
+
+    NotificationPatchRequest:
+      type: object
+      properties:
+        is_read: { type: boolean, default: true }
+
+    SupportTicketCreateRequest:
+      type: object
+      required: [subject]
+      properties:
+        category: { type: string, default: 课程与平台反馈 }
+        subject: { type: string }
+        description: { type: string }
+
+    LearningEventRequest:
+      type: object
+      required: [course_id]
+      properties:
+        course_id: { type: string }
+        video_id: { type: [string, "null"] }
+        event_type: { type: string, enum: [watch_progress, replay_segment, skip_segment], default: watch_progress }
+        position_sec: { type: integer, minimum: 0, default: 0 }
+        watched_seconds: { type: integer, minimum: 0, maximum: 3600, default: 30 }
+        completed: { type: boolean, default: false }
+
+    NoteCreateRequest:
+      type: object
+      required: [course_id, video_id, content]
+      properties:
+        course_id: { type: string }
+        video_id: { type: string }
+        timestamp_sec: { type: integer, minimum: 0, default: 0 }
+        content: { type: string }
+        is_bookmark: { type: boolean, default: false }
+
+    NotePatchRequest:
+      type: object
+      properties:
+        content: { type: [string, "null"] }
+        is_bookmark: { type: [boolean, "null"] }
+        timestamp_sec: { type: [integer, "null"] }
+
+    TutorAskRequest:
+      type: object
+      required: [question]
+      properties:
+        question: { type: string, minLength: 1, maxLength: 2000 }
+        quick_action:
+          type: [string, "null"]
+          enum: [explain_simply, give_example, summarize_key_points, null]
+        video_context: { type: [object, "null"] }
+
+    MessageFeedbackRequest:
+      type: object
+      properties:
+        vote: { type: [string, "null"], enum: [up, down, reported, null] }
+        bookmarked: { type: [boolean, "null"] }
+        reason: { type: string }
+
+    QuizSessionStartRequest:
+      type: object
+      properties:
+        session_type:
+          type: string
+          enum: [chapter_practice, personalized, exam, wrong_retry]
+          default: chapter_practice
+        chapter_id: { type: [string, "null"] }
+        exam_id: { type: [string, "null"] }
+        wrong_record_ids:
+          type: array
+          items: { type: string }
+        count: { type: integer, minimum: 1, maximum: 25, default: 3 }
+
+    QuizSubmissionRequest:
+      type: object
+      properties:
+        answers:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+    WrongQuestionPatchRequest:
+      type: object
+      properties:
+        is_mastered: { type: [boolean, "null"] }
+        review_note: { type: [string, "null"] }
+
+    CourseCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        code: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        category: { type: string, default: 人工智能 }
+        cover_url: { type: string }
+        description: { type: string }
+        start_date: { type: string }
+        end_date: { type: string }
+        submit_for_review: { type: boolean, default: true }
+
+    CoursePatchRequest:
+      type: object
+      properties:
+        code: { type: [string, "null"] }
+        title: { type: [string, "null"] }
+        subtitle: { type: [string, "null"] }
+        category: { type: [string, "null"] }
+        cover_url: { type: [string, "null"] }
+        cover_color: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        start_date: { type: [string, "null"] }
+        end_date: { type: [string, "null"] }
+        status: { type: [string, "null"], enum: [draft, pending_review, closed, archived, null] }
+
+    ClassCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        term: { type: string, default: 2026秋季学期 }
+
+    StudentRosterImportRequest:
+      type: object
+      properties:
+        class_id: { type: [string, "null"] }
+        group_name: { type: string }
+        usernames_or_csv:
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: string }
+
+    EnrollmentPatchRequest:
+      type: object
+      properties:
+        class_id: { type: [string, "null"] }
+        group_name: { type: [string, "null"] }
+
+    VideoUploadRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        media_url: { type: string }
+        duration_sec: { type: integer, default: 480 }
+        raw_transcript_text: { type: string }
+        knowledge_points: { type: array, items: { type: string } }
+        run_inline: { type: boolean, default: false }
+
+    ChunkUploadInitRequest:
+      type: object
+      required: [filename, total_size, total_chunks]
+      properties:
+        filename: { type: string }
+        title: { type: string }
+        total_size: { type: integer, minimum: 1 }
+        total_chunks: { type: integer, minimum: 1 }
+
+    ChunkUploadCompleteRequest:
+      type: object
+      properties:
+        title: { type: string }
+        knowledge_points: { type: array, items: { type: string } }
+        run_inline: { type: boolean, default: false }
+
+    ChapterRegenerateRequest:
+      type: object
+      properties:
+        start_sec: { type: integer, minimum: 0 }
+        end_sec: { type: integer, minimum: 1 }
+        current_title: { type: string }
+        instruction: { type: string }
+
+    CalibratedOutlineRequest:
+      type: object
+      required: [chapters]
+      properties:
+        chapters: { type: array, items: { type: object } }
+        change_note: { type: string }
+
+    DocumentUploadRequest:
+      type: object
+      required: [title, content_text]
+      properties:
+        title: { type: string }
+        file_format: { type: string, default: markdown }
+        content_text: { type: string }
+
+    QuestionManualCreateRequest:
+      type: object
+      required: [stem, answer]
+      properties:
+        chapter_id: { type: [string, "null"] }
+        question_type: { type: string, default: single_choice }
+        stem: { type: string }
+        options:
+          type: array
+          items: { type: object }
+        answer:
+          type: array
+          items: { type: string }
+        explanation: { type: string }
+        difficulty: { type: string, default: medium }
+        knowledge_point: { type: string, default: 核心概念 }
+
+    QuestionBatchGenRequest:
+      type: object
+      properties:
+        chapter_ids: { type: array, items: { type: string } }
+        knowledge_points: { type: array, items: { type: string } }
+        question_types: { type: array, items: { type: string } }
+        difficulty: { type: string, enum: [easy, medium, hard, mixed], default: mixed }
+        count: { type: integer, minimum: 1, maximum: 15, default: 3 }
+
+    QuestionReviewPatchRequest:
+      type: object
+      properties:
+        stem: { type: [string, "null"] }
+        options: { type: [array, "null"], items: { type: object } }
+        answer: { type: [array, "null"], items: { type: string } }
+        explanation: { type: [string, "null"] }
+        difficulty: { type: [string, "null"] }
+        knowledge_point: { type: [string, "null"] }
+        question_type: { type: [string, "null"] }
+        chapter_id: { type: [string, "null"] }
+        review_status: { type: [string, "null"], enum: [pending_review, approved, rejected, null] }
+
+    ExamCreateRequest:
+      type: object
+      required: [title, question_ids]
+      properties:
+        title: { type: string }
+        question_ids: { type: array, items: { type: string } }
+        time_limit_min: { type: integer, default: 30 }
+        max_attempts: { type: integer, default: 3 }
+        target_class_id: { type: [string, "null"] }
+        start_time: { type: [string, "null"] }
+        end_time: { type: [string, "null"] }
+
+    InboxResolveRequest:
+      type: object
+      required: [teacher_answer]
+      properties:
+        teacher_answer: { type: string }
+        sync_to_kb: { type: boolean, default: true }
+        pin_as_faq: { type: boolean, default: false }
+
+    TutorConfigRequest:
+      type: object
+      properties:
+        strict_course_only: { type: boolean, default: true }
+        allow_out_of_syllabus: { type: boolean, default: false }
+        tone: { type: string, default: encouraging_academic }
+        forbidden_topics: { type: array, items: { type: string } }
+
+    FaqCreateRequest:
+      type: object
+      required: [question, answer]
+      properties:
+        question: { type: string }
+        answer: { type: string }
+        is_pinned: { type: boolean, default: true }
+
+    FaqPatchRequest:
+      type: object
+      properties:
+        question: { type: [string, "null"] }
+        answer: { type: [string, "null"] }
+        is_pinned: { type: [boolean, "null"] }
+
+    TeacherQualityFeedbackRequest:
+      type: object
+      required: [input_text]
+      properties:
+        sample_type: { type: string, enum: [outline, question, tutor_reply], default: outline }
+        input_text: { type: string }
+        model_output: { type: string }
+        reason: { type: string }
+
+    OrgCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        org_type: { type: string, enum: [department, grade, class], default: class }
+        parent_id: { type: [string, "null"] }
+
+    OrgPatchRequest:
+      type: object
+      properties:
+        name: { type: [string, "null"] }
+        org_type: { type: [string, "null"], enum: [department, grade, class, null] }
+        parent_id: { type: [string, "null"] }
+
+    UserCreateRequest:
+      type: object
+      required: [username, display_name, password]
+      properties:
+        username: { type: string }
+        display_name: { type: string }
+        email: { type: string }
+        password: { type: string, minLength: 8 }
+        role: { type: string, enum: [student, teacher, admin], default: student }
+        org_id: { type: [string, "null"] }
+
+    BatchUserImportRequest:
+      type: object
+      required: [csv_text]
+      properties:
+        csv_text: { type: string }
+        org_id: { type: [string, "null"] }
+
+    UserPatchRequest:
+      type: object
+      properties:
+        display_name: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        org_id: { type: [string, "null"] }
+        role: { type: [string, "null"], enum: [student, teacher, admin, null] }
+        is_active: { type: [boolean, "null"] }
+        teacher_approved: { type: [boolean, "null"] }
+        teacher_status: { type: [string, "null"], enum: [pending, approved, rejected, null] }
+        reject_reason: { type: [string, "null"] }
+        reset_password: { type: [string, "null"] }
+
+    PermissionsMatrixPutRequest:
+      type: object
+      properties:
+        roles: { type: [object, "null"] }
+        items: { type: [array, "null"], items: { type: object } }
+
+    BatchClassAssignRequest:
+      type: object
+      required: [course_id, class_id]
+      properties:
+        course_id: { type: string }
+        class_id: { type: string }
+        student_ids: { type: array, items: { type: string } }
+        source_org_id: { type: [string, "null"] }
+        group_name: { type: string }
+
+    CategoryCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        slug: { type: string }
+        sort_order: { type: integer, default: 0 }
+        is_visible: { type: boolean, default: true }
+
+    CategoryPatchRequest:
+      type: object
+      properties:
+        name: { type: [string, "null"] }
+        slug: { type: [string, "null"] }
+        sort_order: { type: [integer, "null"] }
+        is_visible: { type: [boolean, "null"] }
+
+    CourseGovernancePatchRequest:
+      type: object
+      properties:
+        status:
+          type: [string, "null"]
+          enum: [published, pending_review, rejected, archived, takedown, null]
+        reject_reason: { type: [string, "null"] }
+        is_featured: { type: [boolean, "null"] }
+        storage_quota_mb: { type: [integer, "null"] }
+        expires_at: { type: [string, "null"] }
+
+    TakedownRequest:
+      type: object
+      properties:
+        reason: { type: string, default: 敏感或版权合规处置下架 }
+
+    AdminRetryRequest:
+      type: object
+      properties:
+        run_inline: { type: boolean, default: true }
+
+    SpotCheckDrawRequest:
+      type: object
+      properties:
+        sample_type: { type: string, enum: [all, tutor_reply, outline, question], default: all }
+        sample_ratio_pct: { type: number, minimum: 1, maximum: 100, default: 20.0 }
+        max_count: { type: integer, minimum: 1, maximum: 100, default: 10 }
+        course_id: { type: [string, "null"] }
+
+    SpotCheckCreateRequest:
+      type: object
+      required: [course_id, input_text]
+      properties:
+        course_id: { type: string }
+        sample_type: { type: string, enum: [tutor_reply, outline, question], default: tutor_reply }
+        message_id: { type: [string, "null"] }
+        input_text: { type: string }
+        model_output: { type: string }
+        admin_note: { type: string }
+
+    SampleResolutionRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [corrected, blocked, synced_eval] }
+        admin_note: { type: string }
+        corrected_output: { type: string }
+
+    AdminRuntimePatchRequest:
+      type: object
+      properties:
+        confidence_threshold: { type: [number, "null"] }
+        feature_flags: { type: [object, "null"] }
+        safety_filter: { type: [object, "null"] }
+        rate_limit_per_minute: { type: [object, "null"] }
+        active_provider: { type: [string, "null"] }
+
+    AnnouncementCreateRequest:
+      type: object
+      required: [title, content]
+      properties:
+        title: { type: string }
+        content: { type: string }
+        target_role: { type: string, enum: [all, student, teacher], default: all }
+
+    TicketPatchRequest:
+      type: object
+      properties:
+        status: { type: [string, "null"], enum: [open, in_progress, resolved, null] }
+        assignee_id: { type: [string, "null"] }
+        assignee_name: { type: [string, "null"] }
+        assignee_note: { type: [string, "null"] }
+
+paths:
+  /healthz:
+    get:
+      tags: [Probe]
+      security: []
+      summary: 服务存活与真实数据库连接探针 (SELECT 1)
+      responses:
+        "200": { description: 服务与数据库连通正常 }
+        "503": { description: 数据库探活失败 }
+
+  /metrics:
+    get:
+      tags: [Probe]
+      security: []
+      summary: 输出 Prometheus 标准文本监控指标
+      responses:
+        "200":
+          description: Prometheus 文本格式指标
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /media/{category}/{filename}:
+    get:
+      tags: [MediaStreaming]
+      security: []
+      summary: 媒体对象流式读取接口（支持 HTTP 206 Partial Content Range 字节流跳转与防目录穿越保护）
+      parameters:
+        - name: category
+          in: path
+          required: true
+          schema: { type: string, enum: [videos, documents, covers, subtitles] }
+        - name: filename
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 完整媒体字节流 }
+        "206": { description: 指定字节范围媒体分片流 }
+        "404": { description: 媒体资源不存在 }
+
+  /api/v1/auth/tokens:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 用户名密码登录并签发 JWT 访问令牌与刷新令牌（滑动窗口防爆破限流）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200": { description: 返回 access_token、refresh_token 与用户角色档案 }
+
+  /api/v1/auth/registrations:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 商业门户自助注册账号（学生即开即用；教师注册后默认进入 pending 待审状态）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201": { description: 注册成功并签发双令牌 }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 使用有效 refresh_token 轮换续期新的 access_token 与 refresh_token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshTokenRequest" }
+      responses:
+        "200": { description: 返回轮换后的新双令牌 }
+
+  /api/v1/users/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前登录用户档案、连续打卡天数与教师审核状态
+      responses:
+        "200": { description: 当前用户详情 }
+
+  /api/v1/users/me/password:
+    put:
+      tags: [Auth]
+      summary: 校验原密码并修改当前登录账号密码（强口令校验）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordChangeRequest" }
+      responses:
+        "200": { description: 密码已更新 }
+
+  /api/v1/users/me/notifications:
+    get:
+      tags: [Auth]
+      summary: 获取当前用户站内消息通知与未读计数
+      responses:
+        "200": { description: 通知列表与 unread_count }
+
+  /api/v1/users/me/notifications/{notif_id}:
+    patch:
+      tags: [Auth]
+      summary: 标记指定站内通知（或 notif_id=all 全部）为已读
+      parameters:
+        - name: notif_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationPatchRequest" }
+      responses:
+        "200": { description: 通知已读状态已更新 }
+
+  /api/v1/users/me/support-tickets:
+    get:
+      tags: [Courses]
+      summary: 查询当前登录师生本人提交的反馈工单、指派处理人与回复进展
+      responses:
+        "200": { description: 个人工单列表 }
+
+  /api/v1/categories:
+    get:
+      tags: [Courses]
+      security: []
+      summary: 查询平台可见课程学科分类列表
+      responses:
+        "200": { description: 可见分类列表 }
+
+  /api/v1/announcements:
+    get:
+      tags: [Courses]
+      summary: 获取面向当前角色生效的全站系统公告
+      responses:
+        "200": { description: 生效公告列表 }
+
+  /api/v1/courses:
+    get:
+      tags: [Courses]
+      summary: 查询已上架课程广场列表（支持分类、关键字、精品筛选与分页）
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: featured_only
+          in: query
+          schema: { type: boolean, default: false }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200": { description: 课程分页列表 }
+
+  /api/v1/courses/{course_id}:
+    get:
+      tags: [Courses]
+      summary: 获取课程详情、可见视频列表、未下架讲义摘要、精选 FAQ、试卷约束与已用作答次数
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 课程聚合详情 }
+
+  /api/v1/courses/{course_id}/enrollments:
+    post:
+      tags: [Courses]
+      summary: 学生选修加入课程班级
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201": { description: 选课成功 }
+
+  /api/v1/support-tickets:
+    post:
+      tags: [Courses]
+      summary: 师生提交问题反馈与支持工单
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SupportTicketCreateRequest" }
+      responses:
+        "201": { description: 工单已创建 }
+
+  /api/v1/videos/{video_id}/playback:
+    get:
+      tags: [StudentLearning]
+      summary: 获取视频播放信息、已发布章节提纲锚点与秒级对齐文字稿
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 视频播放与章节文字稿聚合信息 }
+
+  /api/v1/users/me/learning-events:
+    post:
+      tags: [StudentLearning]
+      summary: 记录学习进度、回看片段或跳过片段，并自动更新连续学习天数 streak_days
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LearningEventRequest" }
+      responses:
+        "201": { description: 行为记录已保存 }
+
+  /api/v1/users/me/notes:
+    get:
+      tags: [StudentLearning]
+      summary: 查询个人视频时间戳笔记与重点书签
+      parameters:
+        - name: video_id
+          in: query
+          schema: { type: string }
+        - name: course_id
+          in: query
+          schema: { type: string }
+        - name: bookmarks_only
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200": { description: 笔记列表 }
+    post:
+      tags: [StudentLearning]
+      summary: 创建绑定视频秒级时间点的学习笔记/书签
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NoteCreateRequest" }
+      responses:
+        "201": { description: 笔记创建成功 }
+
+  /api/v1/users/me/notes/{note_id}:
+    patch:
+      tags: [StudentLearning]
+      summary: 编辑个人笔记内容、书签标记或时间戳秒数
+      parameters:
+        - name: note_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotePatchRequest" }
+      responses:
+        "200": { description: 笔记已更新 }
+    delete:
+      tags: [StudentLearning]
+      summary: 删除个人学习笔记
+      parameters:
+        - name: note_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 笔记已删除 }
+
+  /api/v1/users/me/bookmarked-messages:
+    get:
+      tags: [StudentLearning]
+      summary: 查询当前学生收藏的未屏蔽 AI 助教精选回答列表
+      parameters:
+        - name: course_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: 收藏助教消息列表 }
+
+  /api/v1/courses/{course_id}/tutor-threads:
+    get:
+      tags: [StudentLearning]
+      summary: 获取学生在指定课程下的 AI 助教历史会话列表
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 会话列表 }
+    post:
+      tags: [StudentLearning]
+      summary: 新建 AI 助教对话线程并发送首条提问（受角色 AI 配额滑动限流保护）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TutorAskRequest" }
+      responses:
+        "201": { description: 返回新会话、AI 回答、引用出处与建议追问 }
+        "429": { description: 超出角色每分钟 AI 调用限额 }
+
+  /api/v1/tutor-threads/{thread_id}/messages:
+    get:
+      tags: [StudentLearning]
+      summary: 获取对话线程内的完整消息历史（已屏蔽违规回答自动替换为合规提示）
+      parameters:
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 消息列表 }
+    post:
+      tags: [StudentLearning]
+      summary: 在既有会话中携带最近 6 条上下文继续多轮追问（受角色 AI 配额限流保护）
+      parameters:
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TutorAskRequest" }
+      responses:
+        "201": { description: 返回助教回复；若低置信度则自动流转至教师未解答收件箱 }
+        "429": { description: 超出角色每分钟 AI 调用限额 }
+
+  /api/v1/tutor-messages/{message_id}/feedback:
+    post:
+      tags: [StudentLearning]
+      summary: 对 AI 助教回答进行收藏、点赞或点踩举报（点踩关联 message_id 进入问题样本池）
+      parameters:
+        - name: message_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageFeedbackRequest" }
+      responses:
+        "200": { description: 反馈已记录 }
+
+  /api/v1/courses/{course_id}/quiz-sessions:
+    post:
+      tags: [StudentLearning]
+      summary: 发起章节自测、正式试卷考试（校验开放时间/目标班级/最大次数）、个性化薄弱点测验或错题本重练
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuizSessionStartRequest" }
+      responses:
+        "201": { description: 返回测验场次、题目快照与考试限时/限次元数据 }
+        "400": { description: 考试未开放或已达最大作答次数 }
+        "403": { description: 不在目标考试班级 }
+
+  /api/v1/quiz-sessions/{session_id}/submissions:
+    post:
+      tags: [StudentLearning]
+      summary: 提交测验答案，即时获得判分、逐题解析，错题自动归集错题本并更新连续打卡天数
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuizSubmissionRequest" }
+      responses:
+        "201": { description: 判分与详细解析结果 }
+
+  /api/v1/users/me/wrong-questions:
+    get:
+      tags: [StudentLearning]
+      summary: 查询个人错题本（支持按课程、知识点、掌握状态筛选）
+      parameters:
+        - name: course_id
+          in: query
+          schema: { type: string }
+        - name: knowledge_point
+          in: query
+          schema: { type: string }
+        - name: include_mastered
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        "200": { description: 错题本记录列表 }
+
+  /api/v1/users/me/wrong-questions/{record_id}:
+    patch:
+      tags: [StudentLearning]
+      summary: 标记错题为已掌握或记录复盘心得
+      parameters:
+        - name: record_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WrongQuestionPatchRequest" }
+      responses:
+        "200": { description: 状态已更新 }
+
+  /api/v1/users/me/dashboard:
+    get:
+      tags: [StudentLearning]
+      summary: 个人学习仪表盘（学习时长、真实连续学习天数、测验成绩曲线、已完成章节过滤的 AI 学习推荐）
+      responses:
+        "200": { description: 个人学情与推荐聚合数据 }
+
+  /api/v1/teacher/courses:
+    get:
+      tags: [TeacherStudio]
+      summary: 获取教师负责的课程列表（附带班级、视频、讲义文档与试卷列表）
+      responses:
+        "200": { description: 教师课程列表 }
+    post:
+      tags: [TeacherStudio]
+      summary: 创建新课程（草稿或提交管理员审核）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CourseCreateRequest" }
+      responses:
+        "201": { description: 课程已创建 }
+
+  /api/v1/teacher/courses/{course_id}:
+    patch:
+      tags: [TeacherStudio]
+      summary: 编辑课程基础信息、起止日期或切换状态（草稿/重新提审/结课/归档）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CoursePatchRequest" }
+      responses:
+        "200": { description: 课程信息已更新 }
+
+  /api/v1/teacher/courses/{course_id}/cover-uploads:
+    post:
+      tags: [TeacherStudio]
+      summary: 上传课程封面图片并更新 cover_url
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                cover_file: { type: string, format: binary }
+      responses:
+        "201": { description: 封面已上传并返回 cover_url }
+
+  /api/v1/teacher/courses/{course_id}/classes:
+    post:
+      tags: [TeacherStudio]
+      summary: 为课程新建教学班级并记录审计日志
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClassCreateRequest" }
+      responses:
+        "201": { description: 班级已创建 }
+
+  /api/v1/teacher/courses/{course_id}/students:
+    get:
+      tags: [TeacherStudio]
+      summary: 查询课程选课学生名册、所属班级、学习小组与学习进度
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: class_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: 课程学生列表 }
+
+  /api/v1/teacher/courses/{course_id}/students/import:
+    post:
+      tags: [TeacherStudio]
+      summary: 批量按用户名/CSV 文本导入学生至课程班级与学习小组
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StudentRosterImportRequest" }
+      responses:
+        "201": { description: 批量加入班级结果 }
+
+  /api/v1/teacher/courses/{course_id}/students/xlsx-import:
+    post:
+      tags: [TeacherStudio]
+      summary: 上传原生 .xlsx 或 .csv 名单批量导入班级学生与分组
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                class_id: { type: string }
+                group_name: { type: string }
+      responses:
+        "201": { description: Excel 名单导入结果 }
+
+  /api/v1/teacher/enrollments/{enrollment_id}:
+    patch:
+      tags: [TeacherStudio]
+      summary: 调整选课学生所属教学班级或学习小组
+      parameters:
+        - name: enrollment_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrollmentPatchRequest" }
+      responses:
+        "200": { description: 分班与分组已更新 }
+    delete:
+      tags: [TeacherStudio]
+      summary: 将学生移出课程班级
+      parameters:
+        - name: enrollment_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 已移除选课记录 }
+
+  /api/v1/teacher/courses/{course_id}/videos:
+    post:
+      tags: [TeacherStudio]
+      summary: 登记视频元数据、校验课程存储配额并提交异步 AI 章节化流水线任务
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VideoUploadRequest" }
+      responses:
+        "202": { description: 视频已登记并触发 AI 异步章节切分任务 }
+        "400": { description: 超出课程存储配额上限 }
+
+  /api/v1/teacher/courses/{course_id}/video-uploads:
+    post:
+      tags: [TeacherStudio]
+      summary: 上传真实视频文件及可选字幕，校验存储配额后触发 AI 章节化任务
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [video_file]
+              properties:
+                video_file: { type: string, format: binary }
+                subtitle_file: { type: string, format: binary }
+                title: { type: string }
+                knowledge_points: { type: string }
+                run_inline: { type: boolean }
+      responses:
+        "202": { description: 真实视频已落盘并触发异步 AI 语音识别与章节切分任务 }
+
+  /api/v1/teacher/courses/{course_id}/video-uploads/init:
+    post:
+      tags: [TeacherStudio]
+      summary: 初始化或断点续传恢复大视频分片上传会话（返回已有 uploaded_chunks）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChunkUploadInitRequest" }
+      responses:
+        "200": { description: 命中未完成同文件会话并返回断点续传分片列表 }
+        "201": { description: 创建新分片上传会话 }
+
+  /api/v1/teacher/video-uploads/{upload_id}/chunks/{chunk_index}:
+    put:
+      tags: [TeacherStudio]
+      summary: 上传单个视频二进制分片
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: chunk_index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                chunk_file: { type: string, format: binary }
+      responses:
+        "200": { description: 分片落盘成功并返回已接收分片计数 }
+
+  /api/v1/teacher/video-uploads/{upload_id}/complete:
+    post:
+      tags: [TeacherStudio]
+      summary: 合并全部分片、校验课程存储配额、探测时长并触发异步 AI 章节化任务
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChunkUploadCompleteRequest" }
+      responses:
+        "202": { description: 分片合并完成并触发 AI 章节化任务 }
+
+  /api/v1/teacher/videos/{video_id}/job-sync:
+    post:
+      tags: [TeacherStudio]
+      summary: 主动同步指定视频绑定的异步 AI 章节化任务最新状态与结果
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 返回同步后的视频提纲状态与任务进度 }
+
+  /api/v1/teacher/videos/{video_id}/outline-versions:
+    get:
+      tags: [TeacherStudio]
+      summary: 查看视频章节提纲全部历史版本（AI 初稿、历次人工校准与当前发布版）
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 提纲版本历史列表 }
+    post:
+      tags: [TeacherStudio]
+      summary: 保存教师人工校准后的新提纲版本
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CalibratedOutlineRequest" }
+      responses:
+        "201": { description: 新校准版本已保存 }
+
+  /api/v1/teacher/videos/{video_id}/outline-versions/{version_id}/publications:
+    post:
+      tags: [TeacherStudio]
+      summary: 发布指定提纲版本，发布后对学生可见并同步至 AI 知识库
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 提纲版本已生效并对学生端开放 }
+
+  /api/v1/teacher/videos/{video_id}/chapter-regenerations:
+    post:
+      tags: [TeacherStudio]
+      summary: 截取指定时间段转写字幕调用 AI 重新生成单章节标题与摘要（受角色 AI 配额保护）
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChapterRegenerateRequest" }
+      responses:
+        "200": { description: 返回新生成的单章结构 }
+
+  /api/v1/teacher/courses/{course_id}/documents:
+    post:
+      tags: [TeacherStudio]
+      summary: 在线录入课程文字资料（校验存储配额）并同步触发 AI 知识库索引构建
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentUploadRequest" }
+      responses:
+        "201": { description: 资料已保存并建立 RAG 索引 }
+
+  /api/v1/teacher/courses/{course_id}/document-uploads:
+    post:
+      tags: [TeacherStudio]
+      summary: 上传真实课程文档文件 (.pdf/.docx/.pptx/.md/.txt)，校验存储配额并构建 RAG 索引
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [document_file]
+              properties:
+                document_file: { type: string, format: binary }
+                title: { type: string }
+      responses:
+        "201": { description: 文档已保存、完成文本提取并建立 RAG 索引 }
+
+  /api/v1/teacher/documents/{document_id}:
+    delete:
+      tags: [TeacherStudio]
+      summary: 删除课程讲义资料、释放课程已用存储配额并从 AI 知识库清理向量切片
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 讲义已删除并释放配额 }
+
+  /api/v1/teacher/courses/{course_id}/questions:
+    get:
+      tags: [TeacherStudio]
+      summary: 查询课程题库列表（支持按审核状态与知识点过滤）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: review_status
+          in: query
+          schema: { type: string }
+        - name: knowledge_point
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: 题库题目列表 }
+    post:
+      tags: [TeacherStudio]
+      summary: 教师手动创建题库试题（默认 approved / manual）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionManualCreateRequest" }
+      responses:
+        "201": { description: 手动试题已录入 }
+
+  /api/v1/teacher/courses/{course_id}/question-generations:
+    post:
+      tags: [TeacherStudio]
+      summary: 调用 AI 按章节/知识点/难度批量生成待审试题（受角色 AI 配额限流保护）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionBatchGenRequest" }
+      responses:
+        "201": { description: 待审试题已生成入库 }
+
+  /api/v1/teacher/questions/{question_id}:
+    patch:
+      tags: [TeacherStudio]
+      summary: 教师逐题审核或完整编辑题干、选项、标准答案、解析、题型、章节与难度
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionReviewPatchRequest" }
+      responses:
+        "200": { description: 题目已更新 }
+    delete:
+      tags: [TeacherStudio]
+      summary: 从课程题库删除指定题目
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 题目已删除 }
+
+  /api/v1/teacher/courses/{course_id}/exams:
+    get:
+      tags: [TeacherStudio]
+      summary: 查询课程已创建组卷列表
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 试卷列表 }
+    post:
+      tags: [TeacherStudio]
+      summary: 组卷发布测验试卷（支持目标班级、开放起止时间、限时与限次）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExamCreateRequest" }
+      responses:
+        "201": { description: 试卷已发布 }
+
+  /api/v1/teacher/exams/{exam_id}:
+    delete:
+      tags: [TeacherStudio]
+      summary: 删除指定试卷
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 试卷已删除 }
+
+  /api/v1/teacher/courses/{course_id}/unanswered-questions:
+    get:
+      tags: [TeacherStudio]
+      summary: 查看 AI 低置信度流转而来的未解答问题收件箱
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 未解答问题列表 }
+
+  /api/v1/teacher/unanswered-questions/{item_id}/resolutions:
+    post:
+      tags: [TeacherStudio]
+      summary: 教师解答问题并一键回流课程 AI 知识库（可选沉淀置顶 FAQ）
+      parameters:
+        - name: item_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InboxResolveRequest" }
+      responses:
+        "200": { description: 已解答并同步写入 AI 知识库索引 }
+
+  /api/v1/teacher/courses/{course_id}/tutor-config:
+    get:
+      tags: [TeacherStudio]
+      summary: 查询课程 AI 助教回答边界配置
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 课程助教策略配置 }
+    put:
+      tags: [TeacherStudio]
+      summary: 保存课程 AI 助教回答边界配置并记录审计
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TutorConfigRequest" }
+      responses:
+        "200": { description: 配置已更新 }
+
+  /api/v1/teacher/courses/{course_id}/faqs:
+    get:
+      tags: [TeacherStudio]
+      summary: 查询课程精选 FAQ 列表
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: FAQ 列表 }
+    post:
+      tags: [TeacherStudio]
+      summary: 新建课程置顶精选 FAQ
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaqCreateRequest" }
+      responses:
+        "201": { description: FAQ 已创建 }
+
+  /api/v1/teacher/faqs/{faq_id}:
+    patch:
+      tags: [TeacherStudio]
+      summary: 编辑课程 FAQ 问答或置顶状态
+      parameters:
+        - name: faq_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaqPatchRequest" }
+      responses:
+        "200": { description: FAQ 已更新 }
+    delete:
+      tags: [TeacherStudio]
+      summary: 删除指定课程 FAQ
+      parameters:
+        - name: faq_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: FAQ 已删除 }
+
+  /api/v1/teacher/courses/{course_id}/quality-feedback:
+    post:
+      tags: [TeacherStudio]
+      summary: 教师将存在质量瑕疵的 AI 章节提纲或 AI 试题上报至管理端样本治理池
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TeacherQualityFeedbackRequest" }
+      responses:
+        "201": { description: 质量反馈样本已上报 }
+
+  /api/v1/teacher/courses/{course_id}/analytics:
+    get:
+      tags: [TeacherStudio]
+      summary: 教师学情看板（视频完播率/回看热力图/跳过次数、提问盲区聚类、测验五段分数分布、逐题正确率排行与薄弱点）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 课程学情综合数据 }
+
+  /api/v1/admin/overview:
+    get:
+      tags: [AdminGovernance]
+      summary: 管理端平台总览看板（区分活跃用户/有行为深度参与用户/总注册账号，聚合六大域指标）
+      responses:
+        "200": { description: 平台运营与 AI 治理汇总数据 }
+
+  /api/v1/admin/reports/courses.csv:
+    get:
+      tags: [AdminGovernance]
+      summary: 导出 UTF-8 BOM 课程运营 CSV 报表（支持起止日期、课程与班级多维过滤）
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string }
+        - name: end_date
+          in: query
+          schema: { type: string }
+        - name: course_id
+          in: query
+          schema: { type: string }
+        - name: class_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: CSV 附件流
+          content:
+            text/csv:
+              schema: { type: string }
+
+  /api/v1/admin/reports/courses.xlsx:
+    get:
+      tags: [AdminGovernance]
+      summary: 导出原生 OpenXML Excel (.xlsx) 课程运营报表（支持起止日期、课程与班级多维过滤）
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string }
+        - name: end_date
+          in: query
+          schema: { type: string }
+        - name: course_id
+          in: query
+          schema: { type: string }
+        - name: class_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: 原生 .xlsx 字节流附件
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+
+  /api/v1/admin/organizations:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询组织架构节点列表
+      responses:
+        "200": { description: 组织树节点列表 }
+    post:
+      tags: [AdminGovernance]
+      summary: 创建组织架构节点
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrgCreateRequest" }
+      responses:
+        "201": { description: 组织节点已创建 }
+
+  /api/v1/admin/organizations/{org_id}:
+    patch:
+      tags: [AdminGovernance]
+      summary: 修改组织架构节点名称、层级类型或父节点
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrgPatchRequest" }
+      responses:
+        "200": { description: 组织节点已更新 }
+    delete:
+      tags: [AdminGovernance]
+      summary: 删除组织架构节点并安全挂接下属成员
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 组织节点已删除 }
+
+  /api/v1/admin/users:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询全平台用户列表（支持按角色与关键字筛选，含教师资质审核状态）
+      parameters:
+        - name: role
+          in: query
+          schema: { type: string }
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: 用户列表 }
+    post:
+      tags: [AdminGovernance]
+      summary: 管理员创建用户账号并分配院系组织与初始密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreateRequest" }
+      responses:
+        "201": { description: 账号已创建 }
+
+  /api/v1/admin/users/import:
+    post:
+      tags: [AdminGovernance]
+      summary: CSV 文本批量导入师生账号（幂等跳过重名并返回导入统计）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchUserImportRequest" }
+      responses:
+        "201": { description: 批量导入结果汇总 }
+
+  /api/v1/admin/users/xlsx-import:
+    post:
+      tags: [AdminGovernance]
+      summary: 上传原生 .xlsx 或 .csv 文件批量导入师生账号
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                org_id: { type: string }
+      responses:
+        "201": { description: Excel 批量导入结果汇总 }
+
+  /api/v1/admin/users/{user_id}:
+    patch:
+      tags: [AdminGovernance]
+      summary: 更新用户档案、启停状态、角色、教师资质审批/驳回（自动推送站内通知）或重置密码
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserPatchRequest" }
+      responses:
+        "200": { description: 用户账号已更新 }
+    delete:
+      tags: [AdminGovernance]
+      summary: 删除指定用户账号并安全清理关联数据
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 账号已删除 }
+
+  /api/v1/admin/permissions-matrix:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询 student / teacher / admin 三角色细粒度权限矩阵
+      responses:
+        "200": { description: 角色权限矩阵 }
+    put:
+      tags: [AdminGovernance]
+      summary: 更新并持久化角色权限矩阵配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PermissionsMatrixPutRequest" }
+      responses:
+        "200": { description: 权限矩阵已保存 }
+
+  /api/v1/admin/classes/batch-assign:
+    post:
+      tags: [AdminGovernance]
+      summary: 按学生列表或源组织架构节点批量将学生编入课程教学班级与小组
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchClassAssignRequest" }
+      responses:
+        "200": { description: 批量分班完成 }
+
+  /api/v1/admin/categories:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询全部课程分类目录（含隐藏分类）
+      responses:
+        "200": { description: 课程分类列表 }
+    post:
+      tags: [AdminGovernance]
+      summary: 新建课程分类目录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryCreateRequest" }
+      responses:
+        "201": { description: 课程分类已创建 }
+
+  /api/v1/admin/categories/{cat_id}:
+    patch:
+      tags: [AdminGovernance]
+      summary: 修改课程分类名称、排序或可见性
+      parameters:
+        - name: cat_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryPatchRequest" }
+      responses:
+        "200": { description: 课程分类已更新 }
+    delete:
+      tags: [AdminGovernance]
+      summary: 删除课程分类目录
+      parameters:
+        - name: cat_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 课程分类已删除 }
+
+  /api/v1/admin/courses:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询全平台课程治理台账列表
+      responses:
+        "200": { description: 全部课程治理列表 }
+
+  /api/v1/admin/courses/{course_id}/governance:
+    patch:
+      tags: [AdminGovernance]
+      summary: 课程审核通过/驳回、上下架、精品推荐、存储配额与过期时间治理（自动通知授课教师）
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CourseGovernancePatchRequest" }
+      responses:
+        "200": { description: 课程治理属性已更新 }
+
+  /api/v1/admin/courses/{course_id}/resources:
+    get:
+      tags: [AdminGovernance]
+      summary: 审查指定课程下的全部视频与讲义资源清单
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 课程视频与讲义资源清单 }
+
+  /api/v1/admin/courses/cleanup-expired:
+    post:
+      tags: [AdminGovernance]
+      summary: 扫描并自动归档已超 expires_at 有效期的过期课程并记录审计
+      responses:
+        "200": { description: 过期课程清理结果 }
+
+  /api/v1/admin/documents/{document_id}/takedown:
+    post:
+      tags: [AdminGovernance]
+      summary: 单份课程讲义敏感/版权合规下架、释放配额并清理 AI 向量切片
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TakedownRequest" }
+      responses:
+        "200": { description: 资料已下架并清理索引 }
+
+  /api/v1/admin/videos/{video_id}/takedown:
+    post:
+      tags: [AdminGovernance]
+      summary: 单视频敏感/版权合规下架屏蔽 (is_hidden=true)、扣减配额并从 AI 知识库清理对应转写切片
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TakedownRequest" }
+      responses:
+        "200": { description: 视频已合规下架屏蔽 }
+
+  /api/v1/admin/ai-jobs:
+    get:
+      tags: [AdminGovernance]
+      summary: 管理端 AI 生产任务监控队列（支持状态、课程与起止时间过滤，代理调用 /v1/ops/jobs）
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: course_id
+          in: query
+          schema: { type: string }
+        - name: start_time
+          in: query
+          schema: { type: string }
+        - name: end_time
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: AI 异步任务列表 }
+
+  /api/v1/admin/ai-jobs/{job_id}/retries:
+    post:
+      tags: [AdminGovernance]
+      summary: 管理员一键重试失败 AI 任务并记录操作审计日志
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminRetryRequest" }
+      responses:
+        "202": { description: 重试请求已转发至 AI 服务 }
+
+  /api/v1/admin/ai-indexes:
+    get:
+      tags: [AdminGovernance]
+      summary: 合并业务库全量课程与 AI 服务知识库索引健康度全景（未建索引课程显示 unindexed）
+      responses:
+        "200": { description: 全课程知识库索引健康度列表 }
+
+  /api/v1/admin/ai-indexes/{course_id}/rebuilds:
+    post:
+      tags: [AdminGovernance]
+      summary: 管理员一键重建指定课程知识库索引
+      parameters:
+        - name: course_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminRetryRequest" }
+      responses:
+        "202": { description: 重建任务已触发 }
+
+  /api/v1/admin/spot-checks/draw:
+    post:
+      tags: [AdminGovernance]
+      summary: 按比例从生产对话回复、章节提纲与 AI 试题中随机抽样生成人工质检候选池
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpotCheckDrawRequest" }
+      responses:
+        "200": { description: 随机抽样质检候选列表 }
+
+  /api/v1/admin/feedback-samples:
+    get:
+      tags: [AdminGovernance]
+      summary: 查看问题样本队列与 AI 内容抽检记录
+      responses:
+        "200": { description: 问题样本队列 }
+    post:
+      tags: [AdminGovernance]
+      summary: 将人工抽检发现的问题样本录入队列并同步至 AI 回归评测池
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpotCheckCreateRequest" }
+      responses:
+        "201": { description: 抽检样本已登记 }
+
+  /api/v1/admin/feedback-samples/{sample_id}:
+    patch:
+      tags: [AdminGovernance]
+      summary: 处置问题样本（支持 blocked 实时屏蔽学生端违规回答、corrected 录入标准修正并重同步评测池）
+      parameters:
+        - name: sample_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SampleResolutionRequest" }
+      responses:
+        "200": { description: 样本已处置闭环 }
+
+  /api/v1/admin/ai-runtime-config:
+    get:
+      tags: [AdminGovernance]
+      summary: 读取 AI 运行时安全过滤、特性开关、激活模型与角色调用限额
+      responses:
+        "200": { description: 运行时配置详情 }
+    patch:
+      tags: [AdminGovernance]
+      summary: 热更新敏感词库、置信度阈值、V2 特性开关、active_provider 与角色每分钟限流阈值
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminRuntimePatchRequest" }
+      responses:
+        "200": { description: 更新后的运行时配置 }
+
+  /api/v1/admin/announcements:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询全部系统公告记录
+      responses:
+        "200": { description: 系统公告列表 }
+    post:
+      tags: [AdminGovernance]
+      summary: 发布全站或分角色系统公告
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnouncementCreateRequest" }
+      responses:
+        "201": { description: 公告已发布 }
+
+  /api/v1/admin/announcements/{ann_id}:
+    delete:
+      tags: [AdminGovernance]
+      summary: 删除指定系统公告
+      parameters:
+        - name: ann_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 公告已删除 }
+
+  /api/v1/admin/tickets:
+    get:
+      tags: [AdminGovernance]
+      summary: 查询全平台用户反馈支持工单列表
+      responses:
+        "200": { description: 工单列表 }
+
+  /api/v1/admin/tickets/{ticket_id}:
+    patch:
+      tags: [AdminGovernance]
+      summary: 指派工单负责人、更新处理状态与回复意见，并自动向提交人推送站内通知
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketPatchRequest" }
+      responses:
+        "200": { description: 工单处理状态已更新 }
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [AdminGovernance]
+      summary: 多维检索操作审计日志（支持按角色、动作码、关键字、起止日期与条数过滤）
+      parameters:
+        - name: actor_role
+          in: query
+          schema: { type: string }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: start_date
+          in: query
+          schema: { type: string }
+        - name: end_date
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        "200": { description: 审计日志列表 }
+
+  /api/v1/admin/system-status:
+    get:
+      tags: [AdminGovernance]
+      summary: 系统运行健康全景（后端进程、数据库连通与表统计、本地存储磁盘余量、AI 服务健康与策略）
+      responses:
+        "200": { description: 系统全景监控状态 }
+
+  /internal/v1/webhooks/ai-jobs:
+    post:
+      tags: [InternalWebhooks]
+      security: []
+      summary: 接收 AI 服务异步任务完成回调（HMAC-SHA256 验签 + 时间戳防重放 + Idempotency-Key 幂等去重）
+      parameters:
+        - name: X-Webhook-Timestamp
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        "200": { description: 回调已幂等处理 }
+        "401": { description: 签名无效或超出防重放窗口 }

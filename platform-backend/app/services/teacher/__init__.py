@@ -1,0 +1,53 @@
+"""teacher 领域服务子模块统一导出。"""
+from app.services.teacher.courses import (
+    ensure_course_owner_or_admin,
+    check_course_storage_quota,
+    query_teacher_courses,
+    create_new_course,
+    update_teacher_course,
+    upload_course_cover,
+    create_class_for_course,
+    query_course_students,
+    import_course_students_text,
+    import_course_students_tabular,
+    update_student_enrollment,
+    remove_student_enrollment,
+)
+from app.services.teacher.media_and_outlines import (
+    upload_video_and_trigger_ai,
+    apply_chapterization_result_to_video,
+    upload_real_video_file_and_trigger_ai,
+    init_chunk_video_upload,
+    save_chunk_part,
+    complete_chunk_video_upload,
+    regenerate_single_chapter,
+    sync_video_ai_job,
+    query_video_outline_versions,
+    save_calibrated_outline,
+    publish_outline_version,
+    upload_course_document,
+    upload_real_document_file,
+    delete_course_document,
+)
+from app.services.teacher.assessments import (
+    query_course_questions,
+    create_manual_question,
+    generate_questions_for_bank,
+    update_question_review,
+    delete_course_question,
+    query_course_exams,
+    create_course_exam,
+    delete_course_exam,
+)
+from app.services.teacher.inbox_and_analytics import (
+    query_unanswered_inbox,
+    resolve_unanswered_inbox_item,
+    get_tutor_config_dict,
+    upsert_tutor_config,
+    query_course_faqs,
+    create_pinned_faq,
+    update_course_faq,
+    delete_course_faq,
+    submit_teacher_quality_feedback,
+    build_teacher_course_analytics,
+)

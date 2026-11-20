@@ -1,0 +1,368 @@
+{
+  "version": "1.0.0",
+  "description": "智能学习平台 AI 助教服务 (v1.0) 内置基础自测数据集（覆盖课程隔离混合检索、边看边问、多轮指代、超纲拦截、语义章节切分与结构化出题）",
+  "knowledge_documents": [
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "doc_dl_lec1",
+      "title": "第 1 讲：缩放点积注意力与多头子空间表示讲义",
+      "source_type": "document",
+      "content": "自注意力机制通过将输入序列映射为查询向量 Query、键向量 Key 和值向量 Value 计算全局依赖。缩放点积注意力公式需要将 Q 与 K 的转置内积除以根号 d_k，核心原因是当特征维度 d_k 较大时，点积方差随 d_k 线性增长，导致数值落入 Softmax 饱和区使梯度趋近于零。\n\n多头注意力（Multi-Head Attention）通过多组独立线性投影矩阵并行计算多个子空间的注意力分布，拼接后再经输出矩阵融合，使模型能够同时关注句法结构、长程指代与局部语义等不同表征子空间。",
+      "metadata": { "file_format": "markdown" }
+    },
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "doc_dl_lec2",
+      "title": "第 2 讲：大模型推理加速 —— KV Cache 与 PagedAttention",
+      "source_type": "document",
+      "content": "在自回归解码（Autoregressive Decoding）阶段，每生成一个新 Token 仅依赖当前步的 Query 与所有历史步的 Key、Value。KV Cache 通过在 GPU 显存中缓存历史层的 K/V 张量，将单步注意力计算复杂度从序列长度平方级降低至线性级，避免对前缀 Token 重复计算。\n\n传统推理框架为每个请求预分配最大长度的连续显存空间，导致严重的内部碎片与外部碎片。PagedAttention 借鉴操作系统虚拟内存分页管理机制，将 KV Cache 划分为固定大小的非连续物理 KV 块（Block），通过块表（Block Table）按需动态映射逻辑块与物理块，将显存浪费率压缩至 4% 以下并支持前缀共享。",
+      "metadata": { "file_format": "markdown" }
+    },
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "doc_dl_lec3",
+      "title": "第 3 讲：位置编码演进 —— 正弦位置编码与旋转位置编码 RoPE",
+      "source_type": "document",
+      "content": "由于自注意力运算本身具有置换不变性（Permutation Invariance），必须显式注入序列顺序信息。Transformer 原始论文采用不同频率的正弦与余弦函数构造绝对位置编码。\n\n旋转位置编码（RoPE, Rotary Position Embedding）通过对 Query 和 Key 向量在二维复平面上施加与绝对位置成正比的正交旋转矩阵，使得 Q 与 K 的内积天然仅依赖于两者的相对位置距离 m-n，兼具绝对位置实现简洁性与相对位置外推衰减特性。",
+      "metadata": { "file_format": "markdown" }
+    },
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "doc_dl_lec4",
+      "title": "第 4 讲：参数高效微调 LoRA 与直接偏好优化 DPO",
+      "source_type": "document",
+      "content": "全参数微调百亿级大模型需要保存完整优化器状态与梯度，显存开销极高。LoRA（Low-Rank Adaptation）冻结预训练权重矩阵 W_0，在旁路注入两个低秩矩阵 B 和 A（秩 r 远小于隐藏维度 d），仅训练 ΔW = B·A 的低秩参数，可将可训练参数量降低约 1000 倍，且推理时可零延迟合并回原权重。\n\nDPO（Direct Preference Optimization）通过数学变换建立最优策略与奖励函数之间的闭式映射，绕过传统 RLHF 中单独训练奖励模型与 PPO 采样不稳定的流程，直接使用人类偏好正负样本对通过二元交叉熵目标完成对齐优化。",
+      "metadata": { "file_format": "markdown" }
+    },
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "transcript_vid_rope_1",
+      "title": "视频第 3 讲实录 - 3.1 为什么自注意力需要位置信息",
+      "source_type": "video_transcript",
+      "content": "3.1 为什么自注意力需要位置信息\n剖析置换不变性导致词序丢失的原因。\n如果把输入句子中的词序打乱而不加位置编码，自注意力输出的集合表示只是做了一次相同置换，模型根本无法区分主语和宾语的先后顺序。",
+      "metadata": { "video_id": "vid_rope", "chapter_id": "ch_rope_1", "start_sec": 35 }
+    },
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "transcript_vid_rope_2",
+      "title": "视频第 3 讲实录 - 3.2 RoPE 二维旋转矩阵推导",
+      "source_type": "video_transcript",
+      "content": "3.2 RoPE 二维旋转矩阵推导\n利用复数内积性质证明相对位置依赖。\n我们将每两个相邻维度看作一个二维向量乘上旋转角 m*theta，内积展开后旋转矩阵转置相乘恰好抵消绝对起点，只剩下相对偏移量 m 减 n。",
+      "metadata": { "video_id": "vid_rope", "chapter_id": "ch_rope_2", "start_sec": 210 }
+    },
+    {
+      "course_id": "crs_dl_eval",
+      "document_id": "teacher_qa_speculative",
+      "title": "教师权威答疑：投机采样 Speculative Decoding 无损加速原理",
+      "source_type": "teacher_qa",
+      "content": "投机采样（Speculative Decoding）利用轻量草稿模型快速串行猜测 K 个候选 Token，再由目标大模型在一次前向传播中并行验证概率，通过拒绝采样接受率 min(1, p(x)/q(x)) 与残差重采样严格保证输出分布与目标大模型完全一致（数学无损）。",
+      "metadata": {}
+    },
+    {
+      "course_id": "crs_os_eval",
+      "document_id": "doc_os_lec1",
+      "title": "操作系统第 5 讲：死锁预防与银行家算法安全性检查",
+      "source_type": "document",
+      "content": "死锁产生的四个必要条件包括互斥、占有并等待、不可抢占与循环等待。银行家算法在每次资源分配前模拟试探分配，通过寻找安全推进序列判断系统是否处于安全状态，从而避免进入死锁。",
+      "metadata": { "file_format": "markdown" }
+    }
+  ],
+  "in_syllabus_qa": [
+    {
+      "id": "qa_01",
+      "course_id": "crs_dl_eval",
+      "question": "缩放点积注意力为什么要除以根号 d_k？",
+      "expected_doc_ids": ["doc_dl_lec1"],
+      "expected_keywords": ["方差", "Softmax", "梯度"]
+    },
+    {
+      "id": "qa_02",
+      "course_id": "crs_dl_eval",
+      "question": "多头注意力 Multi-Head Attention 相比单头注意力有什么优势？",
+      "expected_doc_ids": ["doc_dl_lec1"],
+      "expected_keywords": ["子空间", "并行"]
+    },
+    {
+      "id": "qa_03",
+      "course_id": "crs_dl_eval",
+      "question": "自回归解码阶段 KV Cache 是如何降低重复计算开销的？",
+      "expected_doc_ids": ["doc_dl_lec2"],
+      "expected_keywords": ["缓存", "线性"]
+    },
+    {
+      "id": "qa_04",
+      "course_id": "crs_dl_eval",
+      "question": "PagedAttention 是如何解决显存碎片问题的？",
+      "quick_action": "explain_simply",
+      "expected_doc_ids": ["doc_dl_lec2"],
+      "expected_keywords": ["分页", "物理", "碎片"]
+    },
+    {
+      "id": "qa_05",
+      "course_id": "crs_dl_eval",
+      "question": "为什么不加位置编码时自注意力无法区分词序？",
+      "video_context": {
+        "video_id": "vid_rope",
+        "chapter_id": "ch_rope_1",
+        "chapter_title": "3.1 为什么自注意力需要位置信息",
+        "timestamp_sec": 45
+      },
+      "expected_doc_ids": ["transcript_vid_rope_1", "doc_dl_lec3"],
+      "expected_keywords": ["置换", "词序"]
+    },
+    {
+      "id": "qa_06",
+      "course_id": "crs_dl_eval",
+      "question": "这里二维旋转矩阵相乘为什么只剩下相对偏移量？",
+      "video_context": {
+        "video_id": "vid_rope",
+        "chapter_id": "ch_rope_2",
+        "chapter_title": "3.2 RoPE 二维旋转矩阵推导",
+        "timestamp_sec": 225
+      },
+      "expected_doc_ids": ["transcript_vid_rope_2", "doc_dl_lec3"],
+      "expected_keywords": ["旋转", "相对"]
+    },
+    {
+      "id": "qa_07",
+      "course_id": "crs_dl_eval",
+      "question": "旋转位置编码 RoPE 如何兼顾绝对实现与相对位置性质？",
+      "quick_action": "summarize_key_points",
+      "expected_doc_ids": ["doc_dl_lec3", "transcript_vid_rope_2"],
+      "expected_keywords": ["旋转", "相对位置"]
+    },
+    {
+      "id": "qa_08",
+      "course_id": "crs_dl_eval",
+      "question": "LoRA 低秩微调的核心原理是什么？为什么推理没有额外延迟？",
+      "expected_doc_ids": ["doc_dl_lec4"],
+      "expected_keywords": ["冻结", "低秩", "合并"]
+    },
+    {
+      "id": "qa_09",
+      "course_id": "crs_dl_eval",
+      "question": "它大概能把可训练参数量减少多少倍？",
+      "conversation_history": [
+        { "role": "user", "content": "请介绍一下 LoRA 低秩适配微调技术。" },
+        { "role": "assistant", "content": "LoRA 通过冻结预训练主干权重并在旁路训练低秩分解矩阵 B 和 A 实现参数高效微调。" }
+      ],
+      "expected_doc_ids": ["doc_dl_lec4"],
+      "expected_keywords": ["1000", "低秩"]
+    },
+    {
+      "id": "qa_10",
+      "course_id": "crs_dl_eval",
+      "question": "DPO 直接偏好优化相比传统 RLHF 省去了哪些繁琐环节？",
+      "quick_action": "give_example",
+      "expected_doc_ids": ["doc_dl_lec4"],
+      "expected_keywords": ["奖励模型", "PPO"]
+    },
+    {
+      "id": "qa_11",
+      "course_id": "crs_dl_eval",
+      "question": "投机采样 Speculative Decoding 为什么能保证输出分布数学无损？",
+      "expected_doc_ids": ["teacher_qa_speculative"],
+      "expected_keywords": ["拒绝采样", "草稿模型"]
+    },
+    {
+      "id": "qa_12",
+      "course_id": "crs_dl_eval",
+      "question": "那个块表映射能把显存浪费率降到多少？",
+      "conversation_history": [
+        { "role": "user", "content": "PagedAttention 分页注意力机制是怎么管理 KV Cache 的？" },
+        { "role": "assistant", "content": "PagedAttention 将 KV Cache 切分为固定大小的非连续物理块并通过块表动态映射。" }
+      ],
+      "expected_doc_ids": ["doc_dl_lec2"],
+      "expected_keywords": ["4%", "块表"]
+    },
+    {
+      "id": "qa_13",
+      "course_id": "crs_os_eval",
+      "question": "银行家算法是如何避免系统进入死锁状态的？",
+      "expected_doc_ids": ["doc_os_lec1"],
+      "expected_keywords": ["安全", "序列"]
+    }
+  ],
+  "out_of_syllabus_qa": [
+    {
+      "id": "oos_01",
+      "course_id": "crs_dl_eval",
+      "question": "量子色动力学中的夸克禁闭拉格朗日量如何做微扰重整化？"
+    },
+    {
+      "id": "oos_02",
+      "course_id": "crs_dl_eval",
+      "question": "凯恩斯主义宏观经济学中的财政支出乘数与挤出效应如何推导？"
+    },
+    {
+      "id": "oos_03",
+      "course_id": "crs_dl_eval",
+      "question": "CRISPR-Cas9 基因编辑中 sgRNA 脱靶切割效率如何实验测定？"
+    },
+    {
+      "id": "oos_04",
+      "course_id": "crs_dl_eval",
+      "question": "拜占庭帝国圣索菲亚大教堂帆拱穹顶结构的承重力学特点是什么？"
+    },
+    {
+      "id": "oos_05",
+      "course_id": "crs_dl_eval",
+      "question": "以太坊 ERC-4337 账户抽象合约中 Bundler 节点如何结算 Gas 费？"
+    },
+    {
+      "id": "oos_06",
+      "course_id": "crs_dl_eval",
+      "question": "操作系统银行家算法寻找安全序列的四个死锁必要条件是什么？",
+      "note": "跨课程串味检测：该知识存在于 crs_os_eval，在 crs_dl_eval 必须严格拦截不串味"
+    }
+  ],
+  "chapterization_cases": [
+    {
+      "id": "chap_01",
+      "course_id": "crs_dl_eval",
+      "video_id": "vid_eval_attn",
+      "video_title": "第 1 讲：Transformer 注意力机制核心剖析",
+      "duration_sec": 540,
+      "expected_min_chapters": 2,
+      "expected_max_chapters": 5,
+      "ground_truth_boundaries_sec": [180, 360],
+      "transcript_segments": [
+        { "start_sec": 0, "end_sec": 45, "text": "首先我们回顾循环神经网络 RNN 在长序列建模中的串行计算瓶颈与梯度衰减问题。" },
+        { "start_sec": 45, "end_sec": 90, "text": "由于每一步隐藏状态必须等待前一时刻计算完成，RNN 无法充分利用 GPU 大规模并行算力。" },
+        { "start_sec": 90, "end_sec": 135, "text": "自注意力机制直接建立任意两个词元位置之间的常数级路径距离，彻底消除串行依赖。" },
+        { "start_sec": 135, "end_sec": 180, "text": "这就是为什么现代大语言模型普遍采用基于自注意力的序列建模底座。" },
+        { "start_sec": 180, "end_sec": 225, "text": "接下来我们推导缩放点积注意力公式，把输入投影为 Query、Key 和 Value 三个矩阵。" },
+        { "start_sec": 225, "end_sec": 270, "text": "当键向量维度 dk 较大时，Query 与 Key 点积的方差等于 dk，极易进入 Softmax 梯度消失饱和区。" },
+        { "start_sec": 270, "end_sec": 315, "text": "除以根号 dk 能将点积重新标准化为单位方差，保证反向传播训练稳定收敛。" },
+        { "start_sec": 315, "end_sec": 360, "text": "经过 Softmax 归一化得到的注意力权重矩阵再与 Value 相乘，即可完成上下文信息聚合。" },
+        { "start_sec": 360, "end_sec": 405, "text": "最后我们来看多头注意力并行子空间表示与残差层归一化结构。" },
+        { "start_sec": 405, "end_sec": 450, "text": "多头机制使用 h 组不同投影参数并行关注语法依赖与指代关系等多维特征。" },
+        { "start_sec": 450, "end_sec": 495, "text": "每个多头子层外部都配有残差连接与 Pre-LayerNorm，防止深层堆叠时的表示退化。" },
+        { "start_sec": 495, "end_sec": 540, "text": "本讲小结：请同学们课后手推缩放因子方差证明并对比多头拼接投影维度。" }
+      ]
+    },
+    {
+      "id": "chap_02",
+      "course_id": "crs_dl_eval",
+      "video_id": "vid_eval_kv",
+      "video_title": "第 2 讲：KV Cache 与 PagedAttention 显存分页管理",
+      "duration_sec": 720,
+      "expected_min_chapters": 3,
+      "expected_max_chapters": 6,
+      "ground_truth_boundaries_sec": [240, 480],
+      "transcript_segments": [
+        { "start_sec": 0, "end_sec": 60, "text": "第一部分我们分析大模型自回归生成 Prefill 预填充阶段与 Decode 解码阶段的计算特征差异。" },
+        { "start_sec": 60, "end_sec": 120, "text": "解码阶段每次只生成一个新词，如果不缓存历史 Key 和 Value 张量就会产生平方级冗余运算。" },
+        { "start_sec": 120, "end_sec": 180, "text": "引入 KV Cache 后单步计算变为矩阵乘向量操作，瓶颈从算力受限转为显存带宽受限。" },
+        { "start_sec": 180, "end_sec": 240, "text": "随着批量并发数与上下文长度增加，KV Cache 占用的显存容量迅速超过模型权重本身。" },
+        { "start_sec": 240, "end_sec": 300, "text": "第二部分我们剖析传统连续显存预分配策略引发的内外部显存碎片问题。" },
+        { "start_sec": 300, "end_sec": 360, "text": "由于无法预先获知每个用户请求最终生成多少个词，按最大长度预留显存会造成超 60% 内部碎片浪费。" },
+        { "start_sec": 360, "end_sec": 420, "text": "不同长度请求频繁申请和释放连续大块显存还会产生外部碎片，导致高并发吞吐率骤降。" },
+        { "start_sec": 420, "end_sec": 480, "text": "这迫使系统架构师寻找类似操作系统虚拟内存的非连续管理方案。" },
+        { "start_sec": 480, "end_sec": 540, "text": "最后我们详解 PagedAttention 分页注意力机制与块表动态映射实现。" },
+        { "start_sec": 540, "end_sec": 600, "text": "PagedAttention 将连续逻辑 KV 块映射到非连续固定大小的物理显存块，按需逐块分配。" },
+        { "start_sec": 600, "end_sec": 660, "text": "在多轮对话或系统提示词共享场景下，多个请求可以通过写时复制机制直接共享前缀物理块。" },
+        { "start_sec": 660, "end_sec": 720, "text": "实验表明 PagedAttention 可将显存浪费率压低至 4% 以内并实现数倍推理吞吐提升。" }
+      ]
+    },
+    {
+      "id": "chap_03_long_video",
+      "course_id": "crs_dl_eval",
+      "video_id": "vid_eval_long75",
+      "video_title": "第 3 讲（45 分钟完整大课）：位置编码与长上下文扩展全解析",
+      "duration_sec": 2700,
+      "expected_min_chapters": 4,
+      "expected_max_chapters": 8,
+      "ground_truth_boundaries_sec": [540, 1080, 1620, 2160],
+      "synthetic_long_blocks": [
+        { "topic": "自注意力置换不变性与序列词序建模挑战", "count": 15, "prefix_first": "第一部分我们探讨自注意力置换不变性与序列词序建模挑战。" },
+        { "topic": "绝对正弦余弦位置编码波长推导与外推局限", "count": 15, "prefix_first": "接下来进入第二部分：绝对正弦余弦位置编码波长推导与外推局限。" },
+        { "topic": "旋转位置编码 RoPE 复平面正交变换数学证明", "count": 15, "prefix_first": "第三部分我们重点证明旋转位置编码 RoPE 复平面正交变换。" },
+        { "topic": "NTK-Aware 动态基频缩放与 YaRN 长窗口外推算法", "count": 15, "prefix_first": "第四部分我们讲解 NTK-Aware 动态基频缩放与 YaRN 长窗口外推算法。" },
+        { "topic": "稀疏滑窗注意力与长文本大海捞针评测工程实践", "count": 15, "prefix_first": "最后我们进入第五部分：稀疏滑窗注意力与长文本大海捞针评测工程实践。" }
+      ]
+    },
+    {
+      "id": "chap_04_raw_text",
+      "course_id": "crs_dl_eval",
+      "video_id": "vid_eval_lora",
+      "video_title": "第 4 讲：LoRA 高效微调与 DPO 对齐实战",
+      "duration_sec": 480,
+      "expected_min_chapters": 2,
+      "expected_max_chapters": 5,
+      "ground_truth_boundaries_sec": [240],
+      "raw_transcript_text": "首先我们剖析百亿大模型全参数微调面临的优化器状态与梯度显存墙困境。冻结预训练权重并引入低秩矩阵分解 LoRA 可以将训练参数量压缩三个数量级。而且推理部署时可以将旁路低秩矩阵直接相加合并回主干线性层实现零延迟。接下来我们转向人类偏好对齐阶段的 DPO 直接偏好优化算法。传统 RLHF 需要维护四个模型并在训练中反复在线采样导致收敛极不稳定。DPO 利用闭式解直接基于偏好样本对优化策略网络，大幅简化工程训练管线。"
+    }
+  ],
+  "assessment_cases": [
+    {
+      "id": "quiz_01",
+      "course_id": "crs_dl_eval",
+      "mode": "teacher_bank",
+      "scope": {
+        "knowledge_points": ["缩放点积注意力", "多头注意力"],
+        "question_types": ["single_choice"],
+        "difficulty": "medium",
+        "count": 4
+      }
+    },
+    {
+      "id": "quiz_02",
+      "course_id": "crs_dl_eval",
+      "mode": "chapter_practice",
+      "scope": {
+        "knowledge_points": ["KV Cache", "PagedAttention"],
+        "question_types": ["single_choice", "multiple_choice", "true_false"],
+        "difficulty": "mixed",
+        "count": 6
+      }
+    },
+    {
+      "id": "quiz_03",
+      "course_id": "crs_dl_eval",
+      "mode": "personalized_diagnostic",
+      "scope": {
+        "question_types": ["single_choice", "true_false"],
+        "difficulty": "hard",
+        "count": 4
+      },
+      "learner_profile": {
+        "weak_knowledge_points": ["旋转位置编码 RoPE", "LoRA 低秩微调"],
+        "recent_wrong_question_stems": ["关于 RoPE 相对位置内积特性的推导"]
+      }
+    },
+    {
+      "id": "quiz_04",
+      "course_id": "crs_dl_eval",
+      "mode": "teacher_bank",
+      "scope": {
+        "knowledge_points": ["DPO 直接偏好优化"],
+        "question_types": ["true_false"],
+        "difficulty": "easy",
+        "count": 4
+      }
+    },
+    {
+      "id": "quiz_05",
+      "course_id": "crs_dl_eval",
+      "mode": "chapter_practice",
+      "scope": {
+        "chapter_ids": ["ch_rope_1", "ch_rope_2"],
+        "question_types": ["multiple_choice"],
+        "difficulty": "medium",
+        "count": 3
+      }
+    },
+    {
+      "id": "quiz_06_max20",
+      "course_id": "crs_dl_eval",
+      "mode": "teacher_bank",
+      "scope": {
+        "knowledge_points": ["缩放点积注意力", "KV Cache", "PagedAttention", "RoPE", "LoRA", "DPO"],
+        "question_types": ["single_choice", "multiple_choice", "true_false"],
+        "difficulty": "mixed",
+        "count": 20
+      }
+    }
+  ]
+}

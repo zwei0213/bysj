@@ -1,0 +1,57 @@
+# Staging（预发布联调验收环境）叠加编排文件
+# 启动方式：
+#   docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+# 连同 Prometheus 监控告警一起启动：
+#   docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml --profile monitoring up --build -d
+
+services:
+  postgres:
+    container_name: slp-staging-postgres
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+
+  ai-tutor-service:
+    container_name: slp-staging-ai-tutor-service
+    environment:
+      APP_ENV: staging
+      ENABLE_V2_HARNESS: ${ENABLE_V2_HARNESS:-true}
+      ENABLE_V2_PERSONALIZATION: ${ENABLE_V2_PERSONALIZATION:-false}
+      ENABLE_V2_RSI: ${ENABLE_V2_RSI:-false}
+    volumes:
+      - staging_ai_runtime_data:/srv/ai-tutor-service/.ai_runtime_data
+
+  platform-backend:
+    container_name: slp-staging-platform-backend
+    environment:
+      APP_ENV: staging
+      UVICORN_WORKERS: 1
+    volumes:
+      - staging_platform_media_data:/srv/storage
+
+  platform-frontend:
+    container_name: slp-staging-platform-frontend
+    ports:
+      - "${STAGING_HTTP_PORT:-8088}:80"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: slp-prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_tsdb:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - backend_internal
+
+volumes:
+  staging_postgres_data:
+  staging_ai_runtime_data:
+  staging_platform_media_data:
+  prometheus_tsdb:

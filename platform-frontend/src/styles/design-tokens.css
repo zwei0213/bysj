@@ -1,0 +1,646 @@
+:root {
+  /* Notion Core Palette */
+  --color-ink: #37352f;
+  --color-ink-secondary: rgba(55, 53, 47, 0.72);
+  --color-ink-muted: rgba(55, 53, 47, 0.6);
+  --color-ink-subtle: rgba(55, 53, 47, 0.42);
+  --color-paper: #f7f6f3;
+  --color-hover-grey: #efedea;
+  --color-active-grey: #e3e1db;
+  --color-hairline: #e9e7e4;
+  --color-link-blue: #2eaadc;
+  --color-marker-red: #eb5757;
+
+  /* Typography — System UI Sans Stack */
+  --font-sans: 'ui-sans-serif', ui-sans-serif, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Typography — Scale */
+  --text-display: 32px;
+  --leading-display: 1.2;
+  --tracking-display: -0.01em;
+  --text-heading: 24px;
+  --leading-heading: 1.3;
+  --text-subheading: 20px;
+  --leading-subheading: 1.4;
+  --text-body-lg: 16px;
+  --leading-body-lg: 1.6;
+  --text-body: 14px;
+  --leading-body: 1.6;
+  --text-label: 12px;
+  --leading-label: 1.4;
+  --tracking-label: 0.02em;
+
+  /* Typography — Weights */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* Spacing (4px base unit, compact density) */
+  --spacing-unit: 4px;
+  --spacing-4: 4px;
+  --spacing-8: 8px;
+  --spacing-12: 12px;
+  --spacing-16: 16px;
+  --spacing-24: 24px;
+  --spacing-32: 32px;
+  --spacing-48: 48px;
+  --spacing-64: 64px;
+  --spacing-96: 96px;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --page-max-width: 708px;
+  --section-gap: 48px;
+  --card-padding: 16px;
+  --element-gap: 8px;
+  --density: compact;
+
+  /* Border Radius (Strictly <= 4px, except 999px pills) */
+  --radius-cards: 4px;
+  --radius-buttons: 4px;
+  --radius-inputs: 4px;
+  --radius-pills: 999px;
+
+  /* Surfaces & Elevation */
+  --surface-paper: #f7f6f3;
+  --surface-white-page: #ffffff;
+  --surface-hover-grey: #efedea;
+  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.12);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, p {
+  margin: 0;
+  text-align: left;
+}
+
+a {
+  color: var(--color-link-blue);
+  text-decoration: none;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code, pre {
+  font-family: var(--font-mono);
+}
+
+code {
+  font-size: 12.5px;
+  background: var(--color-hover-grey);
+  color: var(--color-ink);
+  padding: 1px 5px;
+  border-radius: var(--radius-cards);
+}
+
+hr,
+.hairline {
+  border: none;
+  border-top: 1px solid var(--color-hairline);
+  margin: var(--spacing-24) 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Keyboard Focus Visibility */
+:focus-visible {
+  outline: 1px solid var(--color-ink-muted);
+  outline-offset: 1px;
+}
+
+/* Notion Document Page Container (708px Max Width, Left Aligned) */
+.container,
+.doc-page {
+  width: 100%;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: var(--spacing-48) 0 var(--spacing-96);
+}
+
+.doc-header {
+  margin-bottom: var(--spacing-32);
+  padding-bottom: var(--spacing-16);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.doc-display {
+  font-size: var(--text-display);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display);
+  color: var(--color-ink);
+}
+
+.doc-subtitle {
+  margin-top: var(--spacing-8);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-ink-muted);
+  max-width: 76ch;
+}
+
+.doc-section {
+  margin-bottom: var(--section-gap);
+}
+
+.doc-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-12);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-12);
+}
+
+.section-title {
+  font-size: var(--text-subheading);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-subheading);
+  color: var(--color-ink);
+}
+
+.section-label {
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.muted-text {
+  color: var(--color-ink-muted);
+  font-size: var(--text-body);
+}
+
+.label-text {
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-label);
+  color: var(--color-ink-muted);
+}
+
+/* Flat Notion Card / Document Group (1px Hairline, 4px Radius, Zero Shadow) */
+.card {
+  background-color: transparent;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-cards);
+  padding: var(--card-padding);
+  box-shadow: none;
+}
+
+.surface-white {
+  background-color: var(--surface-white-page);
+}
+
+/* Component 1: Block Row with 16px Drag Handle */
+.block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.block-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-8);
+  background-color: transparent;
+  border: none;
+  border-radius: var(--radius-cards);
+  padding: var(--spacing-4) var(--spacing-8);
+  margin-left: -24px;
+  padding-left: var(--spacing-4);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-ink);
+  transition: background-color 150ms ease;
+}
+
+@media (max-width: 860px) {
+  .block-row {
+    margin-left: 0;
+  }
+}
+
+.block-row:hover,
+.block-row:focus-within,
+.block-row.is-selected {
+  background-color: var(--color-hover-grey);
+}
+
+.block-handle {
+  width: 16px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-ink-subtle);
+  opacity: 0;
+  cursor: grab;
+  user-select: none;
+  transition: opacity 150ms ease;
+}
+
+.block-row:hover .block-handle,
+.block-row:focus-within .block-handle {
+  opacity: 1;
+}
+
+.block-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Component 2: Ghost Button & Quiet Solid Ink Submit */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--spacing-4) var(--spacing-8);
+  border-radius: var(--radius-buttons);
+  border: none;
+  background-color: transparent;
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: none;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--color-hover-grey);
+}
+
+.btn:active:not(:disabled) {
+  background-color: var(--color-active-grey);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  border: 1px solid var(--color-hairline);
+}
+
+.btn-primary {
+  background-color: var(--color-ink);
+  color: var(--surface-white-page);
+  padding: 5px 12px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #2b2925;
+}
+
+.btn-primary:active:not(:disabled) {
+  background-color: #1f1e1b;
+}
+
+.btn-link {
+  color: var(--color-link-blue);
+}
+
+.btn-danger {
+  color: var(--color-marker-red);
+}
+
+.btn-sm {
+  padding: 3px 8px;
+  font-size: var(--text-label);
+}
+
+/* Component 3: Inline Input & Hairline Form Controls */
+.input,
+.inline-input {
+  width: 100%;
+  background-color: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-hairline);
+  border-radius: 0;
+  padding: var(--spacing-4) var(--spacing-8);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-ink);
+  box-shadow: none;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.inline-input {
+  border-bottom-color: transparent;
+}
+
+.input::placeholder,
+.inline-input::placeholder,
+.textarea::placeholder {
+  color: var(--color-ink-muted);
+}
+
+.input:focus,
+.inline-input:focus {
+  outline: none;
+  border-bottom-color: var(--color-hairline);
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.input:focus-visible,
+.inline-input:focus-visible {
+  outline: none;
+  border-bottom: 1px solid var(--color-ink-muted);
+}
+
+.select {
+  width: 100%;
+  background-color: transparent;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-inputs);
+  padding: var(--spacing-4) var(--spacing-8);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-ink);
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.select:hover:not(:disabled) {
+  background-color: var(--color-hover-grey);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--color-ink-muted);
+  box-shadow: none;
+}
+
+.textarea {
+  width: 100%;
+  background-color: transparent;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-inputs);
+  padding: var(--spacing-8) var(--spacing-12);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-ink);
+  resize: vertical;
+  transition: border-color 150ms ease;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-ink-muted);
+  box-shadow: none;
+}
+
+/* Component 4: Callout Block */
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-8);
+  background-color: var(--color-hover-grey);
+  border-radius: var(--radius-cards);
+  padding: var(--spacing-12) var(--spacing-16);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-ink);
+}
+
+.callout-icon {
+  width: 16px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-ink-secondary);
+}
+
+.callout-danger {
+  color: var(--color-marker-red);
+}
+
+.callout-danger .callout-icon {
+  color: var(--color-marker-red);
+}
+
+.callout-accent-blue {
+  background-color: rgba(46, 170, 220, 0.09);
+}
+
+/* Pills / Badges (999px radius, muted paper tones) */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-pills);
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-label);
+  letter-spacing: var(--tracking-label);
+  background-color: var(--color-hover-grey);
+  color: var(--color-ink-secondary);
+  white-space: nowrap;
+}
+
+.badge-link {
+  color: var(--color-link-blue);
+}
+
+.badge-danger {
+  color: var(--color-marker-red);
+}
+
+/* Notion Database Tabs */
+.tabs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-4);
+  border-bottom: 1px solid var(--color-hairline);
+  margin-bottom: var(--spacing-24);
+}
+
+.tab-pill {
+  position: relative;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-buttons) var(--radius-buttons) 0 0;
+  background-color: transparent;
+  color: var(--color-ink-muted);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.tab-pill:hover {
+  background-color: var(--color-hover-grey);
+  color: var(--color-ink);
+}
+
+.tab-pill.active {
+  color: var(--color-ink);
+  font-weight: var(--font-weight-semibold);
+}
+
+.tab-pill.active::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  background-color: var(--color-ink);
+}
+
+/* Notion Hairline Data Table */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  border-top: 1px solid var(--color-hairline);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: var(--spacing-8) var(--spacing-12);
+  border-bottom: 1px solid var(--color-hairline);
+  border-right: 1px solid var(--color-hairline);
+  vertical-align: top;
+}
+
+.data-table th:last-child,
+.data-table td:last-child {
+  border-right: none;
+}
+
+.data-table th {
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-label);
+  letter-spacing: var(--tracking-label);
+  color: var(--color-ink-muted);
+  background-color: transparent;
+  white-space: nowrap;
+}
+
+.data-table tbody tr {
+  transition: background-color 150ms ease;
+}
+
+.data-table tbody tr:hover {
+  background-color: var(--color-hover-grey);
+}
+
+/* Compact Property Grids inside 708px Document */
+.prop-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--color-hairline);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.prop-cell {
+  padding: var(--spacing-12) var(--spacing-12);
+  border-right: 1px solid var(--color-hairline);
+}
+
+.prop-cell:last-child {
+  border-right: none;
+}
+
+@media (max-width: 640px) {
+  .prop-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .prop-cell:nth-child(2n) {
+    border-right: none;
+  }
+  .prop-cell:nth-child(-n+2) {
+    border-bottom: 1px solid var(--color-hairline);
+  }
+}
+
+/* Popover / Modal Surface (Only place in system with shadow) */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 15, 15, 0.24);
+  display: grid;
+  place-items: center;
+  padding: var(--spacing-24);
+  z-index: 120;
+}
+
+.popover-surface {
+  background-color: var(--surface-white-page);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-cards);
+  box-shadow: var(--shadow-popover);
+  padding: var(--spacing-24);
+}
+
+.icon-16 {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  flex-shrink: 0;
+}
+
+/* Reduced Motion Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
